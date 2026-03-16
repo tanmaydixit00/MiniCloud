@@ -1,48 +1,32 @@
-storage.js 
-
 import { supabaseConfig } from "./config.js";
-
-
 const { createClient } = supabase;
 const supabaseClient = createClient(supabaseConfig.url, supabaseConfig.anonKey);
-
 export class StorageManager {
   constructor() {
     this.bucketName = supabaseConfig.bucketName;
   }
-
   sanitizeFilename(filename) {
     return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
   }
-
   async uploadFile(file, userId, onProgress) {
     const safeName = this.sanitizeFilename(file.name);
-    const filePath = `${userId}/${Date.now()}_${safeName}`;
-
-    
-    
+    const filePath = `${userId}/${Date.now()}_${safeName}`; 
     try {
       if (onProgress) onProgress(0);
-
       const { error } = await supabaseClient.storage
         .from(this.bucketName)
         .upload(filePath, file, { cacheControl: "3600", upsert: false });
-
       if (error) throw error;
-
       const { data: urlData } = supabaseClient.storage
         .from(this.bucketName)
         .getPublicUrl(filePath);
-
       if (onProgress) onProgress(100);
-
       return { path: filePath, url: urlData.publicUrl };
     } catch (err) {
       console.error("Supabase upload error:", err);
       throw new Error(err.message || "Failed to upload file.");
     }
   }
-
   async deleteFile(filePath) {
     const { error } = await supabaseClient.storage.from(this.bucketName).remove([filePath]);
     if (error) {
@@ -50,7 +34,6 @@ export class StorageManager {
       throw new Error(error.message || "Failed to delete file.");
     }
   }
-
   async downloadFile(filePath) {
     const { data, error } = await supabaseClient.storage.from(this.bucketName).download(filePath);
     if (error) {
@@ -59,7 +42,6 @@ export class StorageManager {
     }
     return data;
   }
-
   getFileIcon(filename) {
     const ext = filename.split(".").pop().toLowerCase();
     const iconMap = {

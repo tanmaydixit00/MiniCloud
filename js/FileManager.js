@@ -1,5 +1,3 @@
-fileManager.js
-
 const db = firebase.firestore();
 
 export class FileManager {
@@ -23,68 +21,59 @@ export class FileManager {
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     };
-
     const docRef = await this.filesCollection.add(metadata);
     return docRef.id;
   }
 
-  async getUserFiles() {
-    const snapshot = await this.filesCollection
-      .where("ownerId", "==", this.userId)
-      .where("trashed", "==", false)
-      .orderBy("createdAt", "desc")
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: doc.data().createdAt?.toDate?.() || null
-    }));
-  }
-
-  async searchFiles(searchTerm) {
-
-    const snapshot = await this.filesCollection
-      .where("ownerId", "==", this.userId)
-      .where("trashed", "==", false)
-      .get();
-
-    const term = (searchTerm || "").toLowerCase();
-    return snapshot.docs
-      .map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate?.() || null
-      }))
-      .filter((f) => (f.name || "").toLowerCase().includes(term));
-  }
-
-  async deleteFile(fileId) {
-    await this.filesCollection.doc(fileId).delete();
-  }
-
-  async shareFile(fileId, userEmail) {
-    await this.filesCollection.doc(fileId).update({
-      sharedWith: firebase.firestore.FieldValue.arrayUnion(userEmail),
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-  }
-
-  listenToFiles(callback) {
+  listenMyFiles(callback) {
     return this.filesCollection
       .where("ownerId", "==", this.userId)
       .where("trashed", "==", false)
       .orderBy("createdAt", "desc")
-      .onSnapshot(
-        (snapshot) => {
-          const files = snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
-            createdAt: doc.data().createdAt?.toDate?.() || null
-          }));
-          callback(files);
-        },
-        (error) => console.error("Firestore listener error:", error)
-      );
+      .onSnapshot((snap) => callback(this._mapSnap(snap)));
+  }
+
+  listenSharedWithMe(callback) {
+    const email = firebase.auth().currentUser?.email;
+    if (!email) return () => {};
+    return this.filesCollection
+      .where("sharedWith", "array-contains", email)
+      .where("trashed", "==", false)
+      .orderBy("createdAt", "desc")
+      .onSnapshot((snap) => callback(this._mapSnap(snap)));
+  }
+
+  listenStarred(callback) {
+    return this.filesCollection
+      .where("ownerId", "==", this.userId)
+      .where("starred", "==", true)
+      .where("trashed", "==", false)
+      .orderBy("createdAt", "desc")
+      .onSnapshot((snap) => callback(this._mapSnap(snap)));
+  }
+
+  listenRecent(callback) {
+    // same as my-files for now (simple recent)
+    return this.listenMyFiles(callback);
+  }
+
+  listenTrash(callback) {
+    return this.filesCollection
+      .where("ownerId", "==", this.userId)
+      .where("trashed", "==", true)
+      .orderBy("updatedAt", "desc")
+      .onSnapshot((snap) => callback(this._mapSnap(snap)));
+  }
+
+  _mapSnap(snapshot) {
+    return snapshot.docs.map((doc) => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        ...d,
+        createdAt: d.createdAt?.toDate?.() || null,
+        updatedAt: d.updatedAt?.toDate?.() || null
+      };
+    });
   }
 }

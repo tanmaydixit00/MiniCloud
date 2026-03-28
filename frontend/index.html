@@ -1,144 +1,101 @@
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MiniCloud</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MiniCloud</title>
 
-```
-<!-- Font -->
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-
-<!-- CSS -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
-
-<!-- Icons -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-```
 
 </head>
 
 <body>
-
 <div id="app">
 
-```
-<!-- SIDEBAR -->
-<aside class="sidebar">
-    <div class="logo">
-        <i class="fas fa-cloud"></i>
-        <span>MiniCloud</span>
-    </div>
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+      <div class="logo">
+          <i class="fas fa-cloud"></i>
+          <span>MiniCloud</span>
+      </div>
 
-    <nav>
-        <div class="nav-item active"><i class="fas fa-home"></i> Workspace</div>
-        <div class="nav-item"><i class="fas fa-share-nodes"></i> Shared</div>
-        <div class="nav-item"><i class="fas fa-star"></i> Starred</div>
-        <div class="nav-item"><i class="fas fa-clock"></i> Recent</div>
-        <div class="nav-item"><i class="fas fa-trash"></i> Trash</div>
-    </nav>
+      <nav>
+          <div class="nav-item active">Workspace</div>
+          <div class="nav-item">Shared</div>
+          <div class="nav-item">Starred</div>
+          <div class="nav-item">Recent</div>
+          <div class="nav-item">Trash</div>
+      </nav>
 
-    <div class="storage-info">
-        <p>Storage</p>
-        <div class="storage-bar">
-            <div class="storage-used" style="width:65%"></div>
-        </div>
-        <p>6.5 GB of 10 GB used</p>
-        <button class="btn-upgrade">Upgrade</button>
-    </div>
-</aside>
+      <div class="storage-info">
+          <div class="storage-header">
+              <span>Storage</span>
+              <span>65%</span>
+          </div>
+          <div class="storage-bar">
+              <div class="storage-used"></div>
+          </div>
+          <button class="btn-upgrade">Upgrade Plan</button>
+      </div>
+  </aside>
 
-<!-- MAIN -->
-<main class="main-content">
+  <!-- MAIN -->
+  <main class="main">
 
     <!-- HEADER -->
-    <header class="top-header">
-        <div class="search-bar">
-            <input type="text" placeholder="Search your workspace...">
-        </div>
+    <header class="header">
+        <input type="text" placeholder="Search files..." class="search">
 
-        <div style="display:flex; gap:10px; align-items:center;">
+        <div class="header-right">
             <button class="icon-btn"><i class="fas fa-bell"></i></button>
-            <button class="icon-btn"><i class="fas fa-gear"></i></button>
-
-            <!-- USER PROFILE -->
-            <div class="user-profile">
-                <img src="https://ui-avatars.com/api/?name=User&background=6366f1&color=fff">
-
-                <div class="user-info">
-                    <span class="user-name">User1</span>
-                    <span class="user-email">user1@example.com</span>
-                </div>
-
-                <button class="logout-btn">Logout</button>
+            <div class="user">
+                <img src="https://ui-avatars.com/api/?name=User">
+                <span>User1</span>
             </div>
         </div>
     </header>
 
     <!-- CONTENT -->
-    <div class="content-wrapper">
+    <section class="content">
 
-        <!-- PAGE HEADER -->
-        <div class="page-header">
+        <div class="content-top">
             <div>
                 <h1>Workspace</h1>
-                <p class="subtitle">Manage and organize your files efficiently</p>
+                <p>All your files in one place</p>
             </div>
-
-            <div>
-                <button class="icon-btn"><i class="fas fa-th"></i></button>
-                <button class="icon-btn"><i class="fas fa-list"></i></button>
-            </div>
+            <button class="primary-btn">
+                <i class="fas fa-upload"></i> Upload
+            </button>
         </div>
 
-        <!-- UPLOAD -->
-        <div class="modern-upload">
-            <p><i class="fas fa-cloud-upload-alt"></i></p>
-            <h3>Drop files to upload</h3>
-            <p>or</p>
+        <!-- UPLOAD AREA -->
+        <div class="upload-box">
+            <i class="fas fa-cloud-upload-alt"></i>
+            <p>Drag & drop files or <span>browse</span></p>
             <input type="file" multiple>
         </div>
 
-        <!-- QUICK ACCESS -->
-        <div class="quick-access">
-            <h3>Quick Access</h3>
+        <!-- FILE GRID -->
+        <div class="file-grid">
 
-            <div class="quick-files">
-                <div class="quick-file"><i class="fas fa-file-pdf"></i> Reports.pdf</div>
-                <div class="quick-file"><i class="fas fa-file-word"></i> Proposal.docx</div>
-                <div class="quick-file"><i class="fas fa-file-excel"></i> Budget.xlsx</div>
-                <div class="quick-file"><i class="fas fa-file-image"></i> Design.png</div>
+            <div class="file">
+                <i class="fas fa-file-pdf"></i>
+                <p>Report.pdf</p>
             </div>
+
+            <div class="file empty">
+                <i class="fas fa-folder-open"></i>
+                <p>No files yet</p>
+            </div>
+
         </div>
 
-        <!-- FILES -->
-        <div class="files-section">
-            <h3 style="margin-top:30px;">All Files</h3>
+    </section>
 
-            <div class="files-grid">
-
-                <!-- EMPTY STATE -->
-                <div class="empty-state">
-                    <i class="fas fa-folder-open"></i>
-                    <h3>No files yet</h3>
-                    <p>Upload your first file to get started</p>
-                </div>
-
-            </div>
-        </div>
-
-    </div>
-
-    <!-- FLOAT BUTTON -->
-    <button class="floating-upload">
-        <i class="fas fa-plus"></i>
-    </button>
-
-</main>
-```
+  </main>
 
 </div>
-
 </body>
 </html>

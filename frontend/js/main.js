@@ -1,6 +1,7 @@
 import { firebaseConfig } from './config.js';
 import { StorageManager } from './storage.js';
 import { FileManager } from './FileManager.js';
+import { showError, showSuccess, logError, friendlyFirebaseError } from './errorHandler.js';
 
 // ── Firebase init ─────────────────────────────────────────
 let firebaseReady = false;
@@ -235,8 +236,8 @@ async function handleFiles(fileList) {
         storagePath: path, storageUrl: url, ownerEmail: user.email,
       });
     } catch (err) {
-      console.error('Upload failed:', err);
-      alert(`Failed to upload ${file.name}: ${err.message}`);
+      logError('Upload', err);
+      showError(`Failed to upload ${file.name}: ${friendlyFirebaseError(err)}`);
     }
   }
 
@@ -256,13 +257,15 @@ window.openShareModal = (fileId) => {
 
 async function shareHandler() {
   const email = document.getElementById('shareEmail')?.value?.trim();
-  if (!email) return alert('Please enter an email address.');
+  if (!email) return showError('Please enter an email address.');
   try {
     await fileManager.shareFile(shareFileId, email);
     document.getElementById('shareEmail').value = '';
     document.getElementById('shareModal').style.display = 'none';
+    showSuccess('File shared successfully.');
   } catch (err) {
-    alert(`Share failed: ${err.message}`);
+    logError('Share', err);
+    showError(`Share failed: ${friendlyFirebaseError(err)}`);
   }
 }
 
@@ -277,7 +280,8 @@ window.downloadFile = async (storagePath, fileName) => {
     URL.revokeObjectURL(url);
     a.remove();
   } catch (err) {
-    alert(`Download failed: ${err.message}`);
+    logError('Download', err);
+    showError(`Download failed: ${friendlyFirebaseError(err)}`);
   }
 };
 
@@ -288,7 +292,8 @@ window.deleteFile = async (fileId, storagePath) => {
     await storageManager.deleteFile(storagePath);
     await fileManager.deleteFile(fileId);
   } catch (err) {
-    alert(`Delete failed: ${err.message}`);
+    logError('Delete', err);
+    showError(`Delete failed: ${friendlyFirebaseError(err)}`);
   }
 };
 

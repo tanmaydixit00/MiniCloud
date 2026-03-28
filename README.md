@@ -130,8 +130,25 @@ curl http://localhost:5000/api/auth/me \
 
 The frontend is static HTML — no build step required.
 
-1. Configure `frontend/js/config.js` with your Firebase and Supabase credentials.
-2. Serve the `frontend/` directory with any static server:
+### 1. Configure Firebase credentials
+
+```bash
+cp frontend/js/config.example.js frontend/js/config.js
+```
+
+Edit `frontend/js/config.js` and replace the placeholder values with your Firebase project credentials.
+
+> **Where to find these values**: Firebase Console → Project Settings → General → "Your apps" → Web app → Config snippet.
+
+### 2. (Optional) Configure backend
+
+```bash
+cp backend/config/config.example.js backend/config/config.js
+```
+
+Edit `backend/config/config.js` with the same Firebase credentials, then follow the [Backend Setup](#backend-setup) steps above.
+
+### 3. Serve the frontend
 
 ```bash
 npx http-server frontend/

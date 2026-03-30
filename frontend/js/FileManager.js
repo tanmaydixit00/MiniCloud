@@ -8,6 +8,7 @@ export class FileManager {
     // Lazy-init: Firestore is accessed only after firebase.initializeApp() has run
     this.db = firebase.firestore();
     this.filesCollection = this.db.collection('files');
+    console.log('[FileManager] Initialized for user:', userId, 'email:', userEmail);
   }
 
   getCreatedAtMs(file) {
@@ -77,8 +78,15 @@ export class FileManager {
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     };
-    const docRef = await this.filesCollection.add(metadata);
-    return docRef.id;
+    console.log('[FileManager] Adding metadata:', metadata);
+    try {
+      const docRef = await this.filesCollection.add(metadata);
+      console.log('[FileManager] Metadata added with ID:', docRef.id);
+      return docRef.id;
+    } catch (error) {
+      console.error('[FileManager] Failed to add metadata:', error);
+      throw error;
+    }
   }
 
   listenMyFiles(callback, onError) {

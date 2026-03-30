@@ -100,9 +100,11 @@ export function logError(context, error) {
   console.error(`[MiniCloud] ${context}:`, error);
 }
 
-// ── Human-readable Firebase / Firestore error messages ────
+// ── Human-readable Firebase / Firestore / Supabase error messages ────
 export function friendlyFirebaseError(error) {
   const code = error?.code || '';
+  const message = error?.message || '';
+  
   const map = {
     // Auth
     'auth/user-not-found':        'No account found for that email address.',
@@ -124,6 +126,19 @@ export function friendlyFirebaseError(error) {
     'permission-denied':          'You do not have permission to perform this action.',
     'not-found':                  'The requested document was not found.',
     'unavailable':                'Service temporarily unavailable. Please try again.',
+    // Supabase Storage
+    'Duplicate': 'A file with this name already exists.',
+    'Payload too large': 'File is too large. Please upload a smaller file.',
+    'Invalid JWT': 'Authentication failed. Please sign in again.',
   };
-  return map[code] || error?.message || 'An unexpected error occurred.';
+  
+  // Check for mapped error code first
+  if (map[code]) return map[code];
+  
+  // Check for Supabase error messages in the message string
+  for (const [key, value] of Object.entries(map)) {
+    if (message && message.includes(key)) return value;
+  }
+  
+  return error?.message || 'An unexpected error occurred.';
 }

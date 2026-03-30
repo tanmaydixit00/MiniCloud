@@ -5,13 +5,17 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    // Files are stored at: files/{uid}/{timestamp_filename}
+    // Files are stored at: files/{uid}/{timestamp}_{filename}
+    // Users can read/write only their own files
     match /files/{userId}/{allPaths=**} {
+      // Allow reading own files
       allow read: if signedIn() && request.auth.uid == userId;
 
+      // Allow writing own files
       allow write: if signedIn() && request.auth.uid == userId;
     }
 
+    // Deny all other paths
     match /{allPaths=**} {
       allow read, write: if false;
     }

@@ -16,16 +16,24 @@ service cloud.firestore {
       );
     }
 
+    // Files collection - handles file metadata
     match /files/{fileId} {
       // Owner can read/write everything.
       // Shared users can read only.
       allow get, list: if isOwner(resource.data) || isShared(resource.data);
 
       // New files must belong to the signed-in user.
+      // Allow creation for authenticated users
       allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
 
       // Only owner can modify or delete metadata.
       allow update, delete: if isOwner(resource.data);
+    }
+
+    // Users collection - for user profiles (optional)
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow write: if signedIn() && request.auth.uid == userId;
     }
 
     // Deny everything else by default.

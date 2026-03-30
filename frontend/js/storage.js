@@ -17,6 +17,11 @@ export class StorageManager {
       .getMetadata()
       .then(() => true)
       .catch((error) => {
+        console.warn('[StorageManager] Storage probe result:', {
+          code: error?.code,
+          message: error?.message,
+        });
+
         if (error?.code === 'storage/object-not-found') return true;
 
         if (error?.code === 'storage/bucket-not-found') {
@@ -46,7 +51,9 @@ export class StorageManager {
   // Upload a file to Firebase Storage
   // Returns { path, url }
   async uploadFile(file, userId, onProgress, timeoutMs = 120000) {
+    console.log('[StorageManager] Ensuring storage is ready...');
     await this.ensureStorageReady();
+    console.log('[StorageManager] Storage ready, proceeding with upload');
 
     const safeName = this.sanitizeFilename(file.name);
     const filePath = `files/${userId}/${Date.now()}_${safeName}`;
@@ -67,6 +74,7 @@ export class StorageManager {
         settled = true;
         const err = new Error('Upload timed out. Please try again.');
         err.code = 'storage/retry-limit-exceeded';
+        console.error('[StorageManager] Upload timeout:', file.name);
         reject(err);
       }, timeoutMs);
 
@@ -83,7 +91,11 @@ export class StorageManager {
           if (settled) return;
           settled = true;
           clearTimeout(timeoutId);
-          console.error('Firebase Storage upload error:', error);
+          console.error('[StorageManager] Firebase Storage upload error:', {
+            code: error?.code,
+            message: error?.message,
+            file: file.name,
+          });
           const err = new Error(error.message || 'Failed to upload file.');
           err.code = error.code;
           reject(err);
@@ -94,10 +106,12 @@ export class StorageManager {
             const url = await uploadTask.snapshot.ref.getDownloadURL();
             settled = true;
             clearTimeout(timeoutId);
+            console.log('[StorageManager] Upload successful:', { path: filePath, url });
             resolve({ path: filePath, url });
           } catch (err) {
             settled = true;
             clearTimeout(timeoutId);
+            console.error('[StorageManager] Failed to get download URL:', err);
             const out = new Error(err.message || 'Failed to get download URL.');
             out.code = err?.code || 'storage/unknown';
             reject(out);

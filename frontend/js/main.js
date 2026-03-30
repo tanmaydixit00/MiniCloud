@@ -1,5 +1,5 @@
 import { firebaseConfig } from './config.js';
-import { StorageManager } from './storage.js';
+import { StorageManager } from './supabase-storage.js';
 import { FileManager } from './FileManager.js';
 import { showError, showSuccess, logError, friendlyFirebaseError } from './errorHandler.js';
 
@@ -7,9 +7,11 @@ import { showError, showSuccess, logError, friendlyFirebaseError } from './error
 let firebaseReady = false;
 try {
   if (!firebase.apps.length) {
+    console.log('[Firebase] Initializing with config:', firebaseConfig.projectId);
     firebase.initializeApp(firebaseConfig);
   }
   firebaseReady = true;
+  console.log('[Firebase] Initialization successful');
 } catch (e) {
   showFatalError('Firebase initialization failed. Check your credentials in js/config.js.<br><code>' + e.message + '</code>');
 }
@@ -39,26 +41,34 @@ if (firebaseReady) {
 }
 
 // ── Authenticated init ────────────────────────────────────
-function initAuthedUI(user) {
-  storageManager = new StorageManager();
-  fileManager = new FileManager(user.uid, user.email);
+async function initAuthedUI(user) {
+  try {
+    storageManager = new StorageManager();
+    await storageManager.ensureReady();
+    console.log('[Main] StorageManager ready');
+    
+    fileManager = new FileManager(user.uid, user.email);
 
-  const profile = resolveUserProfile(user);
+    const profile = resolveUserProfile(user);
 
-  // Hydrate header
-  const userEmailEl = document.querySelector('.user-email');
-  const userNameEl  = document.querySelector('.user-name');
-  const userAvatarEl = document.querySelector('.user-profile img');
+    // Hydrate header
+    const userEmailEl = document.querySelector('.user-email');
+    const userNameEl  = document.querySelector('.user-name');
+    const userAvatarEl = document.querySelector('.user-profile img');
 
-  if (userEmailEl) userEmailEl.textContent = user.email || '';
-  if (userNameEl)  userNameEl.textContent  = profile.name;
-  if (userAvatarEl) {
-    userAvatarEl.src = profile.photoUrl;
-    userAvatarEl.alt = `${profile.name} avatar`;
+    if (userEmailEl) userEmailEl.textContent = user.email || '';
+    if (userNameEl)  userNameEl.textContent  = profile.name;
+    if (userAvatarEl) {
+      userAvatarEl.src = profile.photoUrl;
+      userAvatarEl.alt = `${profile.name} avatar`;
+    }
+
+    setupAuthListeners();
+    switchRoute('my-files');
+  } catch (err) {
+    logError('Initialize UI', err);
+    showFatalError('Failed to initialize storage: ' + err.message);
   }
-
-  setupAuthListeners();
-  switchRoute('my-files');
 }
 
 // ── Nav & view listeners (no auth required) ───────────────
@@ -220,6 +230,9 @@ function renderFiles(files) {
         </p>
       </div>
       <div class="file-actions">
+        <button class="action-btn" onclick="toggleStar('${file.id}',${!file.starred})" title="${file.starred ? 'Unstar' : 'Star'}">
+          <i class="fas fa-star ${file.starred ? 'starred' : ''}"></i>
+        </button>
         <button class="action-btn" onclick="window.open('${file.storageUrl}','_blank')" title="View">
           <i class="fas fa-eye"></i>
         </button>
@@ -271,7 +284,16 @@ async function handleFiles(fileList) {
   if (!files.length) return;
 
   const user = auth.currentUser;
-  if (!user) return;
+  if (!user) {
+    showError('Not authenticated. Please sign in again.');
+    return;
+  }
+
+  if (!storageManager || !fileManager) {
+    showError('File manager not initialized. Please refresh the page.');
+    console.error('[Upload] Storage or FileManager not ready', { storageManager: !!storageManager, fileManager: !!fileManager });
+    return;
+  }
 
   const uploadZone = document.getElementById('uploadZone');
   const uploadText = uploadZone?.querySelector('p');
@@ -282,18 +304,26 @@ async function handleFiles(fileList) {
   try {
     for (const file of files) {
       try {
+        console.log('[Upload] Starting upload for file:', file.name, 'size:', file.size);
+        
         if (uploadText) uploadText.textContent = `Preparing upload for ${file.name}…`;
         const { path, url } = await storageManager.uploadFile(
           file,
           user.uid,
           (pct) => {
+            console.log('[Upload] Progress:', file.name, pct + '%');
             if (uploadText) uploadText.textContent = `Uploading ${file.name} (${pct}%)…`;
           }
         );
+        
+        console.log('[Upload] Storage upload complete:', { path, url, userId: user.uid });
+        
         await fileManager.addFileMetadata({
           name: file.name, size: file.size, type: file.type,
           storagePath: path, storageUrl: url, ownerEmail: user.email,
         });
+        
+        console.log('[Upload] Metadata saved to Firestore');
         showSuccess(`${file.name} uploaded successfully.`);
       } catch (err) {
         logError('Upload', err);
@@ -339,9 +369,21 @@ async function shareHandler() {
   }
 }
 
+// ── Toggle Star ───────────────────────────────────────────
+window.toggleStar = async (fileId, starred) => {
+  try {
+    await fileManager.toggleStar(fileId, starred);
+    showSuccess(starred ? 'File starred.' : 'File unstarred.');
+  } catch (err) {
+    logError('Toggle star', err);
+    showError(`Toggle star failed: ${friendlyFirebaseError(err)}`);
+  }
+};
+
 // ── Download ──────────────────────────────────────────────
 window.downloadFile = async (storagePath, fileName) => {
   try {
+    console.log('[Download] Starting download:', { storagePath, fileName });
     const blob = await storageManager.downloadFile(storagePath);
     const url = URL.createObjectURL(blob);
     const a = Object.assign(document.createElement('a'), { href: url, download: fileName });
@@ -349,6 +391,7 @@ window.downloadFile = async (storagePath, fileName) => {
     a.click();
     URL.revokeObjectURL(url);
     a.remove();
+    console.log('[Download] Completed:', fileName);
   } catch (err) {
     logError('Download', err);
     showError(`Download failed: ${friendlyFirebaseError(err)}`);

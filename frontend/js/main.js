@@ -11,6 +11,9 @@ let storageManager;
 let fileManager;
 let currentRoute = 'my-files';
 let unsubscribeListener = null;
+let loadingTimer = null;
+
+const LOADING_TIMEOUT_MS = 10000;
 
 // ── Wire up UI immediately (no auth needed for navigation) ─
 setupNavListeners();
@@ -98,8 +101,11 @@ function setupAuthListeners() {
     handleFiles(e.target.files)
   );
 
-  // Drag & drop
+  // Drag & drop and click-to-browse on upload zone
   const uploadZone = document.getElementById('uploadZone');
+  uploadZone?.addEventListener('click', () => {
+    document.getElementById('fileInput')?.click();
+  });
   uploadZone?.addEventListener('dragover', (e) => {
     e.preventDefault();
     uploadZone.classList.add('drag-over');
@@ -146,14 +152,24 @@ function switchRoute(route) {
 
   if (!fileManager) return;
 
-  // Tear down old real-time listener
+  // Tear down old real-time listener and cancel any pending loading timeout
   if (unsubscribeListener) unsubscribeListener();
   unsubscribeListener = null;
+  if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null; }
 
   renderLoading();
 
-  const cb = (files) => renderFiles(files);
+  loadingTimer = setTimeout(() => {
+    loadingTimer = null;
+    renderFiles([]);
+  }, LOADING_TIMEOUT_MS);
+
+  const cb = (files) => {
+    if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null; }
+    renderFiles(files);
+  };
   const onErr = (err) => {
+    if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null; }
     logError('Listener', err);
     showFatalError(`Failed to load files: ${friendlyFirebaseError(err)}`);
   };

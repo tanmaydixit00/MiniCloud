@@ -74,10 +74,18 @@ function setupEventListeners() {
     });
   });
 
+  // upload button → open file picker
+  document.getElementById("uploadBtn")?.addEventListener("click", () => {
+    document.getElementById("fileInput")?.click();
+  });
+
   // upload handlers (only make sense on my-files, but harmless)
   document.getElementById("fileInput")?.addEventListener("change", (e) => handleFiles(e.target.files));
 
   const uploadZone = document.getElementById("uploadZone");
+  uploadZone?.addEventListener("click", () => {
+    document.getElementById("fileInput")?.click();
+  });
   uploadZone?.addEventListener("dragover", (e) => e.preventDefault());
   uploadZone?.addEventListener("drop", (e) => {
     e.preventDefault();
@@ -100,23 +108,35 @@ function switchRoute(route) {
   if (unsubscribeListener) unsubscribeListener();
   unsubscribeListener = null;
 
-  // attach new listener
-  const cb = (files) => renderIfNonEmpty(files);
+  renderLoading();
 
-  if (route === "my-files") unsubscribeListener = fileManager.listenMyFiles(cb);
-  else if (route === "shared") unsubscribeListener = fileManager.listenSharedWithMe(cb);
-  else if (route === "starred") unsubscribeListener = fileManager.listenStarred(cb);
-  else if (route === "recent") unsubscribeListener = fileManager.listenRecent(cb);
-  else if (route === "trash") unsubscribeListener = fileManager.listenTrash(cb);
+  const cb = (files) => renderFiles(files);
+  const onErr = (err) => {
+    console.error("Listener error:", err);
+    const el = document.getElementById("filesList");
+    if (el) el.innerHTML = `<div class="empty-state" style="color:#ff6b6b;"><i class="fas fa-triangle-exclamation"></i><p>Failed to load files. Please try again.</p></div>`;
+  };
+
+  if (route === "my-files") unsubscribeListener = fileManager.listenMyFiles(cb, onErr);
+  else if (route === "shared") unsubscribeListener = fileManager.listenSharedWithMe(cb, onErr);
+  else if (route === "starred") unsubscribeListener = fileManager.listenStarred(cb, onErr);
+  else if (route === "recent") unsubscribeListener = fileManager.listenRecent(cb, onErr);
+  else if (route === "trash") unsubscribeListener = fileManager.listenTrash(cb, onErr);
 }
 
-function renderIfNonEmpty(files) {
-  // If Firestore returns empty, keep existing sample HTML.
-  // Once you upload real files, it will switch to real rendering.
-  if (!files || files.length === 0) return;
+function renderLoading() {
+  const el = document.getElementById("filesList");
+  if (el) el.innerHTML = `<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading files…</p></div>`;
+}
 
+function renderFiles(files) {
   const filesList = document.getElementById("filesList");
   if (!filesList) return;
+
+  if (!files || files.length === 0) {
+    filesList.innerHTML = `<div class="empty-state"><i class="fas fa-folder-open"></i><p>No files here yet</p></div>`;
+    return;
+  }
 
   filesList.innerHTML = files
     .map(
@@ -153,27 +173,51 @@ function renderIfNonEmpty(files) {
     .join("");
 }
 
-// Minimal upload functions (keep your existing upload logic if you already have it)
+// Upload function
 async function handleFiles(fileList) {
   const files = Array.from(fileList || []);
   if (!files.length) return;
 
   const user = auth.currentUser;
+  if (!user) return;
 
-  for (const file of files) {
-    const { path, url } = await storageManager.uploadFile(file, user.uid);
-    await fileManager.addFileMetadata({
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      storagePath: path,
-      storageUrl: url,
-      ownerEmail: user.email
-    });
+  const uploadZone = document.getElementById("uploadZone");
+  const uploadText = uploadZone?.querySelector("p");
+  const uploadBtn = document.getElementById("uploadBtn");
+
+  if (uploadBtn) uploadBtn.disabled = true;
+
+  let successCount = 0;
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    try {
+      if (uploadText) uploadText.textContent = `Uploading ${file.name} (${i + 1}/${files.length})…`;
+      const { path, url } = await storageManager.uploadFile(file, user.uid);
+      await fileManager.addFileMetadata({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        storagePath: path,
+        storageUrl: url,
+        ownerEmail: user.email
+      });
+      successCount++;
+    } catch (err) {
+      console.error("Upload error:", err);
+      alert(`Failed to upload ${file.name}: ${err.message || "Unknown error"}`);
+    }
   }
+
+  if (uploadText) uploadText.innerHTML = "Drag &amp; drop files or <span>browse</span>";
+  if (uploadBtn) uploadBtn.disabled = false;
 
   const input = document.getElementById("fileInput");
   if (input) input.value = "";
+
+  if (successCount > 0) {
+    console.log(`${successCount} file${successCount > 1 ? "s" : ""} uploaded successfully.`);
+  }
 }
 
 // Share modal (uses your existing share modal HTML)

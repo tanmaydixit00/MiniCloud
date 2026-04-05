@@ -37,12 +37,15 @@ const SEARCH_DEBOUNCE_MS = 200;
 let firebaseReady = false;
 let auth;
 try {
+  console.log('[MiniCloud] Firebase config:', JSON.stringify(firebaseConfig, null, 2));
   if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
   }
   auth = firebase.auth();
   firebaseReady = true;
+  console.log('[MiniCloud] Firebase initialized successfully');
 } catch (e) {
+  console.error('[MiniCloud] Firebase init failed:', e);
   showFatalError('Firebase init failed. Check js/config.js.<br><code>' + e.message + '</code>');
 }
 
@@ -68,8 +71,11 @@ if (firebaseReady) {
   const AUTH_CHECK_KEY = '_mc_auth_check';
   const authAttempts = parseInt(sessionStorage.getItem(AUTH_CHECK_KEY) || '0', 10);
 
+  console.log('[MiniCloud] Auth check attempt:', authAttempts);
+
   if (authAttempts >= 2) {
     sessionStorage.removeItem(AUTH_CHECK_KEY);
+    console.error('[MiniCloud] Auth redirect loop detected');
     showFatalError(
       'Authentication service unavailable. Please check:<br>' +
       '<code>apiKey: ' + (firebaseConfig.apiKey || '(empty)') + '</code><br>' +
@@ -80,15 +86,18 @@ if (firebaseReady) {
     sessionStorage.setItem(AUTH_CHECK_KEY, String(authAttempts + 1));
 
     auth.onAuthStateChanged((user) => {
+      console.log('[MiniCloud] Auth state changed:', user ? 'logged in as ' + user.email : 'not logged in');
       if (!user) {
+        console.log('[MiniCloud] Redirecting to login.html');
         window.location.replace('login.html');
         return;
       }
       // Auth succeeded — clear the counter
       sessionStorage.removeItem(AUTH_CHECK_KEY);
+      console.log('[MiniCloud] Auth OK, initializing dashboard');
       initAuthedUI(user);
     }, (err) => {
-      logError('Auth', err);
+      console.error('[MiniCloud] Auth error:', err);
       showFatalError('Auth error: ' + err.message);
     });
   }

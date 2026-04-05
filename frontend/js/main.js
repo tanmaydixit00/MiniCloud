@@ -2,6 +2,7 @@ import { firebaseConfig } from './config.js';
 import { StorageManager } from './supabase-storage.js';
 import { FileManager }    from './FileManager.js';
 import { showError, showSuccess, logError, friendlyFirebaseError } from './errorHandler.js';
+import { sendShareEmail } from './emailService.js';
 
 // ── Constants ──────────────────────────────────────────────
 const ROUTES = Object.freeze({
@@ -589,13 +590,42 @@ async function shareHandler() {
   const email = document.getElementById('shareEmail')?.value?.trim();
   if (!email) return showError('Please enter an email.');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showError('Please enter a valid email address.');
+
   const btn = document.getElementById('shareFileBtn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sharing…'; }
+
   try {
+    // Get file metadata for the email
+    const fileDoc = await fileManager.getFileMetadata(_shareFileId);
+    const user = auth.currentUser;
+    const profile = resolveUserProfile(user);
+
+    // 1. Send email notification
+    let emailSent = false;
+    try {
+      emailSent = await sendShareEmail({
+        toEmail: email,
+        fromName: profile.name,
+        fromEmail: user.email,
+        fileName: fileDoc?.name || 'A file',
+        downloadLink: fileDoc?.storageUrl || '',
+      });
+    } catch (emailErr) {
+      logError('Share email', emailErr);
+      // Continue even if email fails — Firestore share still works
+    }
+
+    // 2. Add recipient to Firestore sharedWith array
     await fileManager.shareFile(_shareFileId, email);
+
     document.getElementById('shareEmail').value = '';
     document.getElementById('shareModal').style.display = 'none';
-    showSuccess('File shared successfully.');
+
+    if (emailSent) {
+      showSuccess(`File shared — notification sent to ${email}.`);
+    } else {
+      showSuccess(`File shared with ${email}.`);
+    }
   } catch (err) {
     logError('Share', err);
     showError(`Share failed: ${friendlyFirebaseError(err)}`);

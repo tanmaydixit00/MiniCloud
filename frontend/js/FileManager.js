@@ -185,6 +185,12 @@ export class FileManager {
   }
 
   // ── Mutations ─────────────────────────────────────────────
+  async getFileMetadata(fileId) {
+    const doc = await this.col.doc(fileId).get();
+    if (!doc.exists) return null;
+    return { id: doc.id, ...doc.data() };
+  }
+
   async shareFile(fileId, email) {
     await this.col.doc(fileId).update({
       sharedWith: firebase.firestore.FieldValue.arrayUnion(

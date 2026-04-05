@@ -1,117 +1,141 @@
-// Firestore file metadata manager
-// Uses the global `firebase` object loaded via CDN in the HTML
+// Firestore file & folder metadata manager
+// Uses the global `firebase` object loaded via CDN compat in HTML
 
 export class FileManager {
   constructor(userId, userEmail = '') {
-    this.userId = userId;
-    this.userEmail = String(userEmail || '').trim().toLowerCase();
-    // Lazy-init: Firestore is accessed only after firebase.initializeApp() has run
-    this.db = firebase.firestore();
-    this.filesCollection = this.db.collection('files');
-    console.log('[FileManager] Initialized for user:', userId, 'email:', userEmail);
+    this.userId      = userId;
+    this.userEmail   = String(userEmail || '').trim().toLowerCase();
+    this.db          = firebase.firestore();
+    this.col         = this.db.collection('files'); // holds both files and folders
+    console.log('[FileManager] Init for user:', userId, userEmail);
   }
 
-  getCreatedAtMs(file) {
-    const value = file?.createdAt;
-    if (!value) return 0;
-    if (typeof value.toMillis === 'function') return value.toMillis();
-    if (typeof value.toDate === 'function') return value.toDate().getTime();
-    const parsed = new Date(value).getTime();
-    return Number.isNaN(parsed) ? 0 : parsed;
+  // ── Helpers ──────────────────────────────────────────────
+  getCreatedAtMs(item) {
+    const v = item?.createdAt;
+    if (!v) return 0;
+    if (typeof v.toMillis === 'function') return v.toMillis();
+    if (typeof v.toDate   === 'function') return v.toDate().getTime();
+    const p = new Date(v).getTime();
+    return Number.isNaN(p) ? 0 : p;
   }
 
   mapAndSortDocs(snapshot) {
-    return snapshot.docs
-      .map((doc) => ({ id: doc.id, ...doc.data() }))
-      .sort((a, b) => this.getCreatedAtMs(b) - this.getCreatedAtMs(a));
+    const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+    // Folders first, then files — both sorted newest first
+    const folders = docs.filter((d) => d.type === 'folder').sort((a,b) => a.name.localeCompare(b.name));
+    const files   = docs.filter((d) => d.type !== 'folder').sort((a,b) => this.getCreatedAtMs(b) - this.getCreatedAtMs(a));
+    return [...folders, ...files];
   }
 
   isIndexOrOrderError(error) {
-    const message = String(error?.message || '').toLowerCase();
-    return error?.code === 'failed-precondition' || message.includes('index') || message.includes('order by');
+    const msg = String(error?.message || '').toLowerCase();
+    return error?.code === 'failed-precondition' || msg.includes('index') || msg.includes('order by');
   }
 
-  listenWithFallback(primaryQueryFactory, fallbackQueryFactory, callback, onError, options = {}) {
-    const emit = (snapshot) => {
-      let files = this.mapAndSortDocs(snapshot);
-      if (typeof options.limit === 'number') {
-        files = files.slice(0, options.limit);
-      }
-      callback(files);
+  listenWithFallback(primaryQF, fallbackQF, callback, onError, options = {}) {
+    const emit = (snap) => {
+      let items = this.mapAndSortDocs(snap);
+      if (typeof options.limit === 'number') items = items.slice(0, options.limit);
+      callback(items);
     };
 
-    let fallbackUnsubscribe = null;
-    const primaryUnsubscribe = primaryQueryFactory().onSnapshot(
-      emit,
-      (error) => {
-        if (fallbackQueryFactory && this.isIndexOrOrderError(error)) {
-          fallbackUnsubscribe = fallbackQueryFactory().onSnapshot(
-            emit,
-            (fallbackError) => {
-              if (onError) onError(fallbackError);
-            }
-          );
-          return;
-        }
-        if (onError) onError(error);
+    let fallbackUnsub = null;
+    const primaryUnsub = primaryQF().onSnapshot(emit, (error) => {
+      if (fallbackQF && this.isIndexOrOrderError(error)) {
+        fallbackUnsub = fallbackQF().onSnapshot(emit, (fe) => { if (onError) onError(fe); });
+        return;
       }
-    );
+      if (onError) onError(error);
+    });
 
     return () => {
-      if (typeof primaryUnsubscribe === 'function') primaryUnsubscribe();
-      if (typeof fallbackUnsubscribe === 'function') fallbackUnsubscribe();
+      if (typeof primaryUnsub  === 'function') primaryUnsub();
+      if (typeof fallbackUnsub === 'function') fallbackUnsub();
     };
   }
 
-  async addFileMetadata(fileData) {
+  // ── Folder CRUD ───────────────────────────────────────────
+  /**
+   * Create a new folder in Firestore.
+   * @param {string}      name      - Folder name
+   * @param {string|null} parentId  - Parent folder id (null = root)
+   */
+  async createFolder(name, parentId = null) {
+    const data = {
+      name:       String(name).trim(),
+      type:       'folder',
+      ownerId:    this.userId,
+      ownerEmail: this.userEmail,
+      parentId:   parentId,
+      starred:    false,
+      trashed:    false,
+      createdAt:  firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt:  firebase.firestore.FieldValue.serverTimestamp(),
+    };
+    const ref = await this.col.add(data);
+    console.log('[FileManager] Folder created:', ref.id, name);
+    return ref.id;
+  }
+
+  // ── File CRUD ─────────────────────────────────────────────
+  /**
+   * Add file metadata after a successful Storage upload.
+   * @param {object}      fileData
+   * @param {string|null} parentId - Folder to place file in (null = root)
+   */
+  async addFileMetadata(fileData, parentId = null) {
     const metadata = {
-      name: fileData.name,
-      size: fileData.size,
-      type: fileData.type || 'application/octet-stream',
+      name:        fileData.name,
+      size:        fileData.size,
+      type:        fileData.type || 'application/octet-stream',
       storagePath: fileData.storagePath,
-      storageUrl: fileData.storageUrl,
-      ownerId: this.userId,
-      ownerEmail: fileData.ownerEmail || '',
-      sharedWith: [],
-      starred: false,
-      trashed: false,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      storageUrl:  fileData.storageUrl,
+      ownerId:     this.userId,
+      ownerEmail:  fileData.ownerEmail || '',
+      parentId:    parentId,
+      sharedWith:  [],
+      starred:     false,
+      trashed:     false,
+      createdAt:   firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt:   firebase.firestore.FieldValue.serverTimestamp(),
     };
-    console.log('[FileManager] Adding metadata:', metadata);
-    try {
-      const docRef = await this.filesCollection.add(metadata);
-      console.log('[FileManager] Metadata added with ID:', docRef.id);
-      return docRef.id;
-    } catch (error) {
-      console.error('[FileManager] Failed to add metadata:', error);
-      throw error;
-    }
+    console.log('[FileManager] Adding metadata:', metadata.name, 'in folder:', parentId);
+    const ref = await this.col.add(metadata);
+    console.log('[FileManager] Metadata saved:', ref.id);
+    return ref.id;
   }
 
-  listenMyFiles(callback, onError) {
+  // ── Listeners ────────────────────────────────────────────
+  /**
+   * Listen to the contents of a folder (files + sub-folders).
+   * parentId = null → show root items.
+   */
+  listenMyFiles(callback, onError, parentId = null) {
     return this.listenWithFallback(
-      () => this.filesCollection
-        .where('ownerId', '==', this.userId)
-        .where('trashed', '==', false)
+      () => this.col
+        .where('ownerId',  '==', this.userId)
+        .where('trashed',  '==', false)
+        .where('parentId', '==', parentId)
         .orderBy('createdAt', 'desc'),
-      () => this.filesCollection
-        .where('ownerId', '==', this.userId)
-        .where('trashed', '==', false),
+      () => this.col
+        .where('ownerId',  '==', this.userId)
+        .where('trashed',  '==', false)
+        .where('parentId', '==', parentId),
       callback,
       onError
     );
   }
 
   listenSharedWithMe(callback, onError) {
-    const sharedIdentity = this.userEmail || this.userId;
+    const who = this.userEmail || this.userId;
     return this.listenWithFallback(
-      () => this.filesCollection
-        .where('sharedWith', 'array-contains', sharedIdentity)
+      () => this.col
+        .where('sharedWith', 'array-contains', who)
         .where('trashed', '==', false)
         .orderBy('createdAt', 'desc'),
-      () => this.filesCollection
-        .where('sharedWith', 'array-contains', sharedIdentity)
+      () => this.col
+        .where('sharedWith', 'array-contains', who)
         .where('trashed', '==', false),
       callback,
       onError
@@ -120,12 +144,12 @@ export class FileManager {
 
   listenStarred(callback, onError) {
     return this.listenWithFallback(
-      () => this.filesCollection
-        .where('ownerId', '==', this.userId)
-        .where('starred', '==', true)
-        .where('trashed', '==', false)
+      () => this.col
+        .where('ownerId',  '==', this.userId)
+        .where('starred',  '==', true)
+        .where('trashed',  '==', false)
         .orderBy('createdAt', 'desc'),
-      () => this.filesCollection
+      () => this.col
         .where('ownerId', '==', this.userId)
         .where('starred', '==', true)
         .where('trashed', '==', false),
@@ -136,27 +160,27 @@ export class FileManager {
 
   listenRecent(callback, onError) {
     return this.listenWithFallback(
-      () => this.filesCollection
+      () => this.col
         .where('ownerId', '==', this.userId)
         .where('trashed', '==', false)
         .orderBy('createdAt', 'desc')
-        .limit(10),
-      () => this.filesCollection
+        .limit(20),
+      () => this.col
         .where('ownerId', '==', this.userId)
         .where('trashed', '==', false),
       callback,
       onError,
-      { limit: 10 }
+      { limit: 20 }
     );
   }
 
   listenTrash(callback, onError) {
     return this.listenWithFallback(
-      () => this.filesCollection
+      () => this.col
         .where('ownerId', '==', this.userId)
         .where('trashed', '==', true)
         .orderBy('createdAt', 'desc'),
-      () => this.filesCollection
+      () => this.col
         .where('ownerId', '==', this.userId)
         .where('trashed', '==', true),
       callback,
@@ -164,26 +188,36 @@ export class FileManager {
     );
   }
 
+  // ── Mutations ─────────────────────────────────────────────
   async shareFile(fileId, email) {
-    await this.filesCollection.doc(fileId).update({
-      sharedWith: firebase.firestore.FieldValue.arrayUnion(String(email || '').trim().toLowerCase()),
+    await this.col.doc(fileId).update({
+      sharedWith: firebase.firestore.FieldValue.arrayUnion(
+        String(email || '').trim().toLowerCase()
+      ),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
   }
 
   async deleteFile(fileId) {
-    await this.filesCollection.doc(fileId).update({
-      trashed: true,
+    await this.col.doc(fileId).update({
+      trashed:   true,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  async restoreFile(fileId) {
+    await this.col.doc(fileId).update({
+      trashed:   false,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
   }
 
   async permanentlyDeleteFile(fileId) {
-    await this.filesCollection.doc(fileId).delete();
+    await this.col.doc(fileId).delete();
   }
 
   async toggleStar(fileId, starred) {
-    await this.filesCollection.doc(fileId).update({
+    await this.col.doc(fileId).update({
       starred,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     });

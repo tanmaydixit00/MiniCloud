@@ -1,19 +1,19 @@
 import { firebaseConfig } from './config.js';
-import { StorageManager } from './supabase-storage.js';
-import { FileManager } from './FileManager.js';
+import { StorageManager } from './firebase-storage.js';
+import { FileManager }    from './FileManager.js';
 import { showError, showSuccess, logError, friendlyFirebaseError } from './errorHandler.js';
 
-// ── Firebase init ─────────────────────────────────────────
+// ── Firebase init ──────────────────────────────────────────
 let firebaseReady = false;
 try {
   if (!firebase.apps.length) {
-    console.log('[Firebase] Initializing with config:', firebaseConfig.projectId);
+    console.log('[Firebase] Initializing project:', firebaseConfig.projectId);
     firebase.initializeApp(firebaseConfig);
   }
   firebaseReady = true;
-  console.log('[Firebase] Initialization successful');
+  console.log('[Firebase] OK');
 } catch (e) {
-  showFatalError('Firebase initialization failed. Check your credentials in js/config.js.<br><code>' + e.message + '</code>');
+  showFatalError('Firebase init failed. Check js/config.js.<br><code>' + e.message + '</code>');
 }
 
 const auth = firebase.auth();
@@ -21,345 +21,423 @@ const auth = firebase.auth();
 let storageManager;
 let fileManager;
 let currentRoute = 'my-files';
-let unsubscribeListener = null;
-const permissionRetryByRoute = new Set();
+let allItems     = [];           // cache for search
 
-// ── Wire up UI immediately (no auth needed for navigation) ─
+// ── Folder navigation state ────────────────────────────────
+// Stack entries: { id: string|null, name: string }
+let folderStack = [{ id: null, name: 'My Files' }];
+const currentFolderId = () => folderStack[folderStack.length - 1].id;
+
+let unsubscribeListener  = null;
+const permissionRetrySet = new Set();
+
+// ── Wire static UI ────────────────────────────────────────
 setupNavListeners();
 
-// ── Auth gate ─────────────────────────────────────────────
+// ── Auth gate ──────────────────────────────────────────────
 if (firebaseReady) {
   auth.onAuthStateChanged((user) => {
-    if (!user) {
-      window.location.href = 'login.html';
-      return;
-    }
+    if (!user) { window.location.href = 'login.html'; return; }
     initAuthedUI(user);
-  }, (err) => {
-    showFatalError('Authentication error: ' + err.message);
-  });
+  }, (err) => showFatalError('Auth error: ' + err.message));
 }
 
-// ── Authenticated init ────────────────────────────────────
+// ── Authenticated bootstrap ────────────────────────────────
 async function initAuthedUI(user) {
   try {
     storageManager = new StorageManager();
     await storageManager.ensureReady();
-    console.log('[Main] StorageManager ready');
-    
-    fileManager = new FileManager(user.uid, user.email);
+    fileManager    = new FileManager(user.uid, user.email);
 
     const profile = resolveUserProfile(user);
-
-    // Hydrate header
-    const userEmailEl = document.querySelector('.user-email');
-    const userNameEl  = document.querySelector('.user-name');
-    const userAvatarEl = document.querySelector('.user-profile img');
-
-    if (userEmailEl) userEmailEl.textContent = user.email || '';
-    if (userNameEl)  userNameEl.textContent  = profile.name;
-    if (userAvatarEl) {
-      userAvatarEl.src = profile.photoUrl;
-      userAvatarEl.alt = `${profile.name} avatar`;
-    }
+    const nameEl  = document.querySelector('.user-name');
+    const emailEl = document.querySelector('.user-email');
+    const imgEl   = document.querySelector('.user-profile img');
+    if (nameEl)  nameEl.textContent  = profile.name;
+    if (emailEl) emailEl.textContent = user.email || '';
+    if (imgEl)   { imgEl.src = profile.photoUrl; imgEl.alt = profile.name + ' avatar'; }
 
     setupAuthListeners();
     switchRoute('my-files');
   } catch (err) {
-    logError('Initialize UI', err);
-    showFatalError('Failed to initialize storage: ' + err.message);
+    logError('Bootstrap', err);
+    showFatalError('Failed to initialize: ' + err.message);
   }
 }
 
-// ── Nav & view listeners (no auth required) ───────────────
+// ── Static nav listeners (no auth needed) ─────────────────
 function setupNavListeners() {
-  // Sidebar tabs
-  document.querySelectorAll('.nav-item[data-route]').forEach((item) => {
-    item.addEventListener('click', (e) => {
-      e.preventDefault();
-      switchRoute(item.dataset.route);
+  document.querySelectorAll('.nav-item[data-route]').forEach((el) => {
+    el.addEventListener('click', (e) => { e.preventDefault(); switchRoute(el.dataset.route); });
+  });
+
+  // Modal backdrop close
+  ['shareModal', 'folderModal'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
     });
   });
 
-  // Grid / List view toggle
-  document.querySelectorAll('.view-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.view-btn').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      const filesList = document.getElementById('filesList');
-      if (!filesList) return;
-      if (btn.dataset.view === 'list') {
-        filesList.classList.replace('files-grid', 'files-list');
-      } else {
-        filesList.classList.replace('files-list', 'files-grid');
-      }
-    });
+  // Folder name input — submit on Enter
+  document.getElementById('folderName')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('createFolderBtn')?.click();
   });
-
-  // Share modal close on backdrop click
-  document.getElementById('shareModal')?.addEventListener('click', (e) => {
-    if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
+  document.getElementById('shareEmail')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('shareFileBtn')?.click();
   });
 }
 
-// ── Auth-dependent listeners ──────────────────────────────
+// ── Auth-dependent listeners ───────────────────────────────
 function setupAuthListeners() {
-  // Logout / Sign Out
+  // Sign out
   document.getElementById('logoutBtn')?.addEventListener('click', async () => {
     if (unsubscribeListener) unsubscribeListener();
     await auth.signOut();
-    // onAuthStateChanged fires with null → redirect to login.html
   });
 
-  // Upload button → open file picker
-  document.getElementById('uploadBtn')?.addEventListener('click', () => {
-    document.getElementById('fileInput')?.click();
+  // Upload button
+  document.getElementById('uploadBtn')?.addEventListener('click', () =>
+    document.getElementById('fileInput')?.click()
+  );
+
+  // Upload zone click
+  document.getElementById('uploadZone')?.addEventListener('click', (e) => {
+    if (e.target !== document.getElementById('fileInput'))
+      document.getElementById('fileInput')?.click();
   });
 
-  // File input change
+  // File input
   document.getElementById('fileInput')?.addEventListener('change', (e) =>
     handleFiles(e.target.files)
   );
 
   // Drag & drop
-  const uploadZone = document.getElementById('uploadZone');
-  uploadZone?.addEventListener('dragover', (e) => {
+  const zone = document.getElementById('uploadZone');
+  zone?.addEventListener('dragover',  (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone?.addEventListener('dragleave', ()  => zone.classList.remove('drag-over'));
+  zone?.addEventListener('drop',      (e) => {
     e.preventDefault();
-    uploadZone.classList.add('drag-over');
-  });
-  uploadZone?.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
-  uploadZone?.addEventListener('drop', (e) => {
-    e.preventDefault();
-    uploadZone.classList.remove('drag-over');
+    zone.classList.remove('drag-over');
     handleFiles(e.dataTransfer.files);
   });
 
-  // Share confirm button
+  // Search
+  document.getElementById('searchInput')?.addEventListener('input', (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    renderItems(q ? allItems.filter((item) => item.name.toLowerCase().includes(q)) : allItems);
+  });
+
+  // Share confirm
   document.getElementById('shareFileBtn')?.addEventListener('click', shareHandler);
+
+  // New Folder
+  document.getElementById('newFolderBtn')?.addEventListener('click', () => {
+    const input = document.getElementById('folderName');
+    if (input) input.value = '';
+    const modal = document.getElementById('folderModal');
+    if (modal) { modal.style.display = 'flex'; setTimeout(() => input?.focus(), 50); }
+  });
+
+  document.getElementById('createFolderBtn')?.addEventListener('click', handleCreateFolder);
 }
 
-// ── Routing ───────────────────────────────────────────────
+// ── Routing ────────────────────────────────────────────────
 function switchRoute(route) {
-  // Don't switch if file manager isn't ready yet
-  if (!fileManager && route !== currentRoute) {
-    // Still update active state in sidebar
-    document.querySelectorAll('.nav-item').forEach((n) => n.classList.remove('active'));
-    document.querySelector(`.nav-item[data-route="${route}"]`)?.classList.add('active');
-    return;
-  }
-
   currentRoute = route;
+
+  // Reset folder navigation when changing top-level route
+  folderStack = [{ id: null, name: routeLabel(route) }];
 
   document.querySelectorAll('.nav-item').forEach((n) => n.classList.remove('active'));
   document.querySelector(`.nav-item[data-route="${route}"]`)?.classList.add('active');
 
-  const titleMap = {
-    'my-files': 'My Files',
-    shared:     'Shared with Me',
-    starred:    'Starred',
-    recent:     'Recent',
-    trash:      'Trash',
-  };
   const titleEl = document.getElementById('pageTitle');
-  if (titleEl) titleEl.textContent = titleMap[route] || 'Files';
+  if (titleEl) titleEl.textContent = routeLabel(route);
 
-  // Upload zone only on my-files
+  // Upload & New Folder only on My Files
+  const actionBtns = document.getElementById('actionBtns');
+  if (actionBtns) actionBtns.style.display = route === 'my-files' ? '' : 'none';
+
   const uploadZone = document.getElementById('uploadZone');
   if (uploadZone) uploadZone.style.display = route === 'my-files' ? '' : 'none';
 
+  // Clear search
+  const searchInput = document.getElementById('searchInput');
+  if (searchInput) searchInput.value = '';
+
+  renderBreadcrumbs();
+
   if (!fileManager) return;
-
-  // Tear down old real-time listener
-  if (unsubscribeListener) unsubscribeListener();
-  unsubscribeListener = null;
-
-  renderLoading();
-
-  const cb = (files) => renderFiles(files);
-  const onRouteError = async (error) => {
-    if (error?.code === 'permission-denied' && !permissionRetryByRoute.has(route) && auth.currentUser) {
-      permissionRetryByRoute.add(route);
-      try {
-        await auth.currentUser.getIdToken(true);
-        switchRoute(route);
-        return;
-      } catch (refreshErr) {
-        logError('Auth token refresh', refreshErr);
-      }
-    }
-
-    logError(`Load ${route} files`, error);
-    renderRouteError(error);
-  };
-
-  if (route === 'my-files')  unsubscribeListener = fileManager.listenMyFiles(cb, onRouteError);
-  else if (route === 'shared')   unsubscribeListener = fileManager.listenSharedWithMe(cb, onRouteError);
-  else if (route === 'starred')  unsubscribeListener = fileManager.listenStarred(cb, onRouteError);
-  else if (route === 'recent')   unsubscribeListener = fileManager.listenRecent(cb, onRouteError);
-  else if (route === 'trash')    unsubscribeListener = fileManager.listenTrash(cb, onRouteError);
+  loadCurrentView();
 }
 
-// ── Render helpers ────────────────────────────────────────
-function renderLoading() {
-  const el = document.getElementById('filesList');
-  if (el) el.innerHTML = `<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading files…</p></div>`;
+function routeLabel(route) {
+  return ({ 'my-files': 'My Files', shared: 'Shared with Me', starred: 'Starred', recent: 'Recent', trash: 'Trash' })[route] || 'Files';
 }
 
-function renderFiles(files) {
-  const el = document.getElementById('filesList');
+// ── Folder navigation ──────────────────────────────────────
+function navigateToFolder(folderId, folderName) {
+  folderStack.push({ id: folderId, name: folderName });
+  renderBreadcrumbs();
+  loadCurrentView();
+}
+
+window.navigateBreadcrumb = (index) => {
+  folderStack = folderStack.slice(0, index + 1);
+  renderBreadcrumbs();
+  loadCurrentView();
+};
+
+function renderBreadcrumbs() {
+  const el = document.getElementById('breadcrumbs');
   if (!el) return;
 
-  permissionRetryByRoute.delete(currentRoute);
-
-  if (!files || files.length === 0) {
-    el.innerHTML = `<div class="empty-state"><i class="fas fa-folder-open"></i><p>No files here yet</p></div>`;
+  if (currentRoute !== 'my-files' || folderStack.length <= 1) {
+    el.innerHTML = '';
     return;
   }
 
-  el.innerHTML = files.map((file) => `
-    <div class="file-card" data-file-id="${file.id}">
-      <div class="file-icon ${storageManager.getFileIcon(file.name)}">
-        <i class="fas ${storageManager.getFontAwesomeIcon(file.name)}"></i>
-      </div>
-      <div class="file-details">
-        <h3 title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</h3>
-        <p class="file-meta">
-          <span>${formatFileSize(file.size)}</span>
-          <span>•</span>
-          <span>${formatDate(file.createdAt?.toDate ? file.createdAt.toDate() : file.createdAt)}</span>
-        </p>
-      </div>
-      <div class="file-actions">
-        <button class="action-btn" onclick="toggleStar('${file.id}',${!file.starred})" title="${file.starred ? 'Unstar' : 'Star'}">
-          <i class="fas fa-star ${file.starred ? 'starred' : ''}"></i>
+  el.innerHTML = folderStack.map((crumb, i) => {
+    const isLast = i === folderStack.length - 1;
+    if (isLast) {
+      return `<span class="breadcrumb-item"><span class="breadcrumb-current">${escapeHtml(crumb.name)}</span></span>`;
+    }
+    return `<span class="breadcrumb-item">
+      <span class="breadcrumb-link" onclick="navigateBreadcrumb(${i})">${escapeHtml(crumb.name)}</span>
+      <i class="fas fa-chevron-right breadcrumb-sep"></i>
+    </span>`;
+  }).join('');
+}
+
+// ── Load / Subscribe ───────────────────────────────────────
+function loadCurrentView() {
+  if (unsubscribeListener) unsubscribeListener();
+  unsubscribeListener = null;
+  renderLoading();
+
+  const cb = (items) => {
+    allItems = items;
+    const q  = document.getElementById('searchInput')?.value.trim().toLowerCase() || '';
+    renderItems(q ? items.filter((i) => i.name.toLowerCase().includes(q)) : items);
+  };
+
+  const onErr = async (error) => {
+    const key = currentRoute + ':' + (currentFolderId() ?? 'root');
+    if (error?.code === 'permission-denied' && !permissionRetrySet.has(key) && auth.currentUser) {
+      permissionRetrySet.add(key);
+      try { await auth.currentUser.getIdToken(true); loadCurrentView(); return; }
+      catch (e) { logError('Token refresh', e); }
+    }
+    logError(`Load ${currentRoute}`, error);
+    renderRouteError(error);
+  };
+
+  if      (currentRoute === 'my-files') unsubscribeListener = fileManager.listenMyFiles(cb, onErr, currentFolderId());
+  else if (currentRoute === 'shared')   unsubscribeListener = fileManager.listenSharedWithMe(cb, onErr);
+  else if (currentRoute === 'starred')  unsubscribeListener = fileManager.listenStarred(cb, onErr);
+  else if (currentRoute === 'recent')   unsubscribeListener = fileManager.listenRecent(cb, onErr);
+  else if (currentRoute === 'trash')    unsubscribeListener = fileManager.listenTrash(cb, onErr);
+}
+
+// ── Render ─────────────────────────────────────────────────
+function renderLoading() {
+  const el = document.getElementById('filesList');
+  if (el) el.innerHTML = `<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading…</p></div>`;
+}
+
+function renderItems(items) {
+  const el = document.getElementById('filesList');
+  if (!el) return;
+
+  permissionRetrySet.delete(currentRoute);
+
+  if (!items || items.length === 0) {
+    const isTrash = currentRoute === 'trash';
+    el.innerHTML = `<div class="empty-state">
+      <i class="fas ${isTrash ? 'fa-trash' : 'fa-folder-open'}"></i>
+      <p>${isTrash ? 'Trash is empty' : 'No files or folders here yet'}</p>
+    </div>`;
+    return;
+  }
+
+  const isTrash  = currentRoute === 'trash';
+
+  el.innerHTML = items.map((item) => {
+    const isFolder = item.type === 'folder';
+    const cardClass = isFolder ? 'file-card folder-card' : 'file-card';
+
+    const folderClick = isFolder
+      ? `onclick="window.openFolder('${item.id}','${escapeAttr(item.name)}')" `
+      : '';
+
+    const iconHtml = isFolder
+      ? `<div class="file-icon folder-icon"><i class="fas fa-folder"></i></div>`
+      : `<div class="file-icon ${storageManager.getFileIcon(item.name)}">
+           <i class="fas ${storageManager.getFontAwesomeIcon(item.name)}"></i>
+         </div>`;
+
+    const metaHtml = isFolder
+      ? `<p class="file-meta"><span>Folder</span></p>`
+      : `<p class="file-meta">
+           <span>${formatFileSize(item.size)}</span>
+           <span>•</span>
+           <span>${formatDate(item.createdAt?.toDate ? item.createdAt.toDate() : item.createdAt)}</span>
+         </p>`;
+
+    let actionsHtml = '';
+    if (isTrash) {
+      actionsHtml = `
+        <button class="action-btn restore" onclick="restoreFile('${item.id}')" title="Restore">
+          <i class="fas fa-rotate-left"></i>
         </button>
-        <button class="action-btn" onclick="window.open('${file.storageUrl}','_blank')" title="View">
+        <button class="action-btn delete" onclick="permanentDeleteFile('${item.id}','${escapeAttr(item.storagePath || '')}')" title="Delete permanently">
+          <i class="fas fa-trash"></i>
+        </button>`;
+    } else if (!isFolder) {
+      actionsHtml = `
+        <button class="action-btn" onclick="toggleStar('${item.id}',${!item.starred})" title="${item.starred ? 'Unstar' : 'Star'}">
+          <i class="fas fa-star ${item.starred ? 'starred' : ''}"></i>
+        </button>
+        <button class="action-btn" onclick="window.open('${item.storageUrl}','_blank')" title="View">
           <i class="fas fa-eye"></i>
         </button>
-        <button class="action-btn" onclick="openShareModal('${file.id}')" title="Share">
+        <button class="action-btn" onclick="openShareModal('${item.id}')" title="Share">
           <i class="fas fa-share-nodes"></i>
         </button>
-        <button class="action-btn" onclick="downloadFile('${file.storagePath}','${escapeAttr(file.name)}')" title="Download">
+        <button class="action-btn" onclick="downloadFile('${escapeAttr(item.storagePath)}','${escapeAttr(item.name)}')" title="Download">
           <i class="fas fa-download"></i>
         </button>
-        <button class="action-btn delete" onclick="deleteFile('${file.id}','${file.storagePath}')" title="Delete">
+        <button class="action-btn delete" onclick="moveToTrash('${item.id}')" title="Move to Trash">
           <i class="fas fa-trash"></i>
+        </button>`;
+    } else {
+      // Folder (not trash) — just star + trash
+      actionsHtml = `
+        <button class="action-btn" onclick="toggleStar('${item.id}',${!item.starred})" title="${item.starred ? 'Unstar' : 'Star'}">
+          <i class="fas fa-star ${item.starred ? 'starred' : ''}"></i>
         </button>
-      </div>
-    </div>`).join('');
+        <button class="action-btn delete" onclick="moveToTrash('${item.id}')" title="Move to Trash">
+          <i class="fas fa-trash"></i>
+        </button>`;
+    }
+
+    return `
+      <div class="${cardClass}" data-id="${item.id}" ${folderClick}>
+        ${iconHtml}
+        <div class="file-details">
+          <h3 title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h3>
+          ${metaHtml}
+        </div>
+        <div class="file-actions">${actionsHtml}</div>
+      </div>`;
+  }).join('');
 }
+
+// ── Open folder ────────────────────────────────────────────
+window.openFolder = (folderId, folderName) => {
+  if (currentRoute !== 'my-files') return;
+  navigateToFolder(folderId, folderName);
+};
 
 function renderRouteError(error) {
   const el = document.getElementById('filesList');
   if (!el) return;
-
-  const message = friendlyFirebaseError(error);
-  el.innerHTML = `
-    <div class="empty-state" style="color:#ffb4b4;">
-      <i class="fas fa-triangle-exclamation"></i>
-      <p>${escapeHtml(message)}</p>
-    </div>`;
-
-  showError(message);
+  const msg = friendlyFirebaseError(error);
+  el.innerHTML = `<div class="empty-state" style="color:#ffb4b4;">
+    <i class="fas fa-triangle-exclamation"></i>
+    <p>${escapeHtml(msg)}</p>
+  </div>`;
+  showError(msg);
 }
 
 function resolveUserProfile(user) {
-  const providerProfiles = Array.isArray(user?.providerData) ? user.providerData : [];
-  const providerName = providerProfiles.find((item) => item?.displayName)?.displayName || '';
-  const providerPhoto = providerProfiles.find((item) => item?.photoURL)?.photoURL || '';
-
-  const email = String(user?.email || '').trim();
-  const emailAlias = email.includes('@') ? email.split('@')[0] : '';
-
-  const name = String(user?.displayName || providerName || emailAlias || 'User').trim();
-  const photoUrl = String(user?.photoURL || providerPhoto || '').trim() ||
-    `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=667eea&color=fff`;
-
+  const pp = Array.isArray(user?.providerData) ? user.providerData : [];
+  const name = String(user?.displayName || pp.find((p) => p?.displayName)?.displayName
+    || (user?.email?.split('@')[0]) || 'User').trim();
+  const photoUrl = String(user?.photoURL || pp.find((p) => p?.photoURL)?.photoURL || '').trim()
+    || `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=0062ff&color=fff`;
   return { name, photoUrl };
 }
 
-// ── Upload ────────────────────────────────────────────────
+// ── Create Folder ──────────────────────────────────────────
+async function handleCreateFolder() {
+  const input = document.getElementById('folderName');
+  const name  = input?.value?.trim();
+  if (!name) { showError('Please enter a folder name.'); return; }
+
+  const btn = document.getElementById('createFolderBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating…'; }
+
+  try {
+    await fileManager.createFolder(name, currentFolderId());
+    document.getElementById('folderModal').style.display = 'none';
+    if (input) input.value = '';
+    showSuccess(`Folder "${name}" created.`);
+  } catch (err) {
+    logError('Create folder', err);
+    showError(`Could not create folder: ${friendlyFirebaseError(err)}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = 'Create'; }
+  }
+}
+
+// ── Upload ─────────────────────────────────────────────────
 async function handleFiles(fileList) {
   const files = Array.from(fileList || []);
   if (!files.length) return;
 
   const user = auth.currentUser;
-  if (!user) {
-    showError('Not authenticated. Please sign in again.');
-    return;
-  }
+  if (!user) { showError('Not authenticated.'); return; }
+  if (!storageManager || !fileManager) { showError('Not ready — refresh page.'); return; }
 
-  if (!storageManager || !fileManager) {
-    showError('File manager not initialized. Please refresh the page.');
-    console.error('[Upload] Storage or FileManager not ready', { storageManager: !!storageManager, fileManager: !!fileManager });
-    return;
-  }
-
-  const uploadZone = document.getElementById('uploadZone');
-  const uploadText = uploadZone?.querySelector('p');
+  const zone    = document.getElementById('uploadZone');
+  const text    = zone?.querySelector('p');
   const uploadBtn = document.getElementById('uploadBtn');
-
   if (uploadBtn) uploadBtn.disabled = true;
 
   try {
     for (const file of files) {
       try {
-        console.log('[Upload] Starting upload for file:', file.name, 'size:', file.size);
-        
-        if (uploadText) uploadText.textContent = `Preparing upload for ${file.name}…`;
-        const { path, url } = await storageManager.uploadFile(
-          file,
-          user.uid,
-          (pct) => {
-            console.log('[Upload] Progress:', file.name, pct + '%');
-            if (uploadText) uploadText.textContent = `Uploading ${file.name} (${pct}%)…`;
-          }
-        );
-        
-        console.log('[Upload] Storage upload complete:', { path, url, userId: user.uid });
-        
-        await fileManager.addFileMetadata({
-          name: file.name, size: file.size, type: file.type,
-          storagePath: path, storageUrl: url, ownerEmail: user.email,
+        if (text) text.textContent = `Preparing ${file.name}…`;
+        const { path, url } = await storageManager.uploadFile(file, user.uid, (pct) => {
+          if (text) text.textContent = `Uploading ${file.name} (${pct}%)…`;
         });
-        
-        console.log('[Upload] Metadata saved to Firestore');
-        showSuccess(`${file.name} uploaded successfully.`);
+        await fileManager.addFileMetadata(
+          { name: file.name, size: file.size, type: file.type, storagePath: path, storageUrl: url, ownerEmail: user.email },
+          currentFolderId()
+        );
+        showSuccess(`${file.name} uploaded.`);
       } catch (err) {
         logError('Upload', err);
-        const message = friendlyFirebaseError(err);
-        showError(`Failed to upload ${file.name}: ${message}`);
-        if (uploadText) uploadText.textContent = `Upload failed for ${file.name}: ${message}`;
-
-        // Stop processing more files if project storage itself is unavailable.
-        if (err?.code === 'storage/bucket-not-found') {
-          break;
-        }
+        showError(`Failed to upload ${file.name}: ${friendlyFirebaseError(err)}`);
+        if (err?.code === 'storage/bucket-not-found') break;
       }
     }
   } finally {
     if (uploadBtn) uploadBtn.disabled = false;
-    if (uploadText) uploadText.innerHTML = 'Drag &amp; drop files or <span>browse</span>';
+    if (text) text.innerHTML = 'Drag &amp; drop files or <span>browse</span>';
+    const input = document.getElementById('fileInput');
+    if (input) input.value = '';
   }
-
-  const input = document.getElementById('fileInput');
-  if (input) input.value = '';
 }
 
-// ── Share ─────────────────────────────────────────────────
-let shareFileId = null;
+// ── Share ──────────────────────────────────────────────────
+let _shareFileId = null;
 
 window.openShareModal = (fileId) => {
-  shareFileId = fileId;
+  _shareFileId = fileId;
   const modal = document.getElementById('shareModal');
-  if (modal) modal.style.display = 'flex';
+  if (modal) {
+    modal.style.display = 'flex';
+    setTimeout(() => document.getElementById('shareEmail')?.focus(), 50);
+  }
 };
 
 async function shareHandler() {
   const email = document.getElementById('shareEmail')?.value?.trim();
-  if (!email) return showError('Please enter an email address.');
+  if (!email) return showError('Please enter an email.');
   try {
-    await fileManager.shareFile(shareFileId, email);
+    await fileManager.shareFile(_shareFileId, email);
     document.getElementById('shareEmail').value = '';
     document.getElementById('shareModal').style.display = 'none';
     showSuccess('File shared successfully.');
@@ -369,87 +447,100 @@ async function shareHandler() {
   }
 }
 
-// ── Toggle Star ───────────────────────────────────────────
-window.toggleStar = async (fileId, starred) => {
+// ── Star ───────────────────────────────────────────────────
+window.toggleStar = async (id, starred) => {
   try {
-    await fileManager.toggleStar(fileId, starred);
-    showSuccess(starred ? 'File starred.' : 'File unstarred.');
+    await fileManager.toggleStar(id, starred);
+    showSuccess(starred ? 'Starred.' : 'Unstarred.');
   } catch (err) {
-    logError('Toggle star', err);
-    showError(`Toggle star failed: ${friendlyFirebaseError(err)}`);
+    logError('Star', err);
+    showError(friendlyFirebaseError(err));
   }
 };
 
-// ── Download ──────────────────────────────────────────────
+// ── Download ───────────────────────────────────────────────
 window.downloadFile = async (storagePath, fileName) => {
   try {
-    console.log('[Download] Starting download:', { storagePath, fileName });
     const blob = await storageManager.downloadFile(storagePath);
-    const url = URL.createObjectURL(blob);
-    const a = Object.assign(document.createElement('a'), { href: url, download: fileName });
-    document.body.appendChild(a);
-    a.click();
-    URL.revokeObjectURL(url);
-    a.remove();
-    console.log('[Download] Completed:', fileName);
+    const url  = URL.createObjectURL(blob);
+    const a    = Object.assign(document.createElement('a'), { href: url, download: fileName });
+    document.body.appendChild(a); a.click();
+    URL.revokeObjectURL(url); a.remove();
   } catch (err) {
     logError('Download', err);
     showError(`Download failed: ${friendlyFirebaseError(err)}`);
   }
 };
 
-// ── Delete ────────────────────────────────────────────────
-window.deleteFile = async (fileId, storagePath) => {
-  if (!confirm('Move this file to trash?')) return;
+// ── Move to Trash (Firestore only — keeps Storage file) ───
+window.moveToTrash = async (id) => {
+  if (!confirm('Move to trash?')) return;
   try {
-    await storageManager.deleteFile(storagePath);
-    await fileManager.deleteFile(fileId);
+    await fileManager.deleteFile(id);
+    showSuccess('Moved to trash.');
   } catch (err) {
-    logError('Delete', err);
-    showError(`Delete failed: ${friendlyFirebaseError(err)}`);
+    logError('Trash', err);
+    showError(friendlyFirebaseError(err));
   }
 };
 
-// ── Fatal error display ───────────────────────────────────
+// ── Restore ────────────────────────────────────────────────
+window.restoreFile = async (id) => {
+  try {
+    await fileManager.restoreFile(id);
+    showSuccess('Restored.');
+  } catch (err) {
+    logError('Restore', err);
+    showError(friendlyFirebaseError(err));
+  }
+};
+
+// ── Permanently Delete ─────────────────────────────────────
+window.permanentDeleteFile = async (id, storagePath) => {
+  if (!confirm('Permanently delete? This cannot be undone.')) return;
+  try {
+    if (storagePath) await storageManager.deleteFile(storagePath);
+    await fileManager.permanentlyDeleteFile(id);
+    showSuccess('Deleted permanently.');
+  } catch (err) {
+    logError('Perm delete', err);
+    showError(friendlyFirebaseError(err));
+  }
+};
+
+// ── Fatal error ────────────────────────────────────────────
 function showFatalError(html) {
   const el = document.getElementById('filesList');
-  if (el) {
-    el.innerHTML = `
-      <div class="empty-state" style="color:#ff6b6b;">
-        <i class="fas fa-triangle-exclamation"></i>
-        <p>${html}</p>
-      </div>`;
-  }
-  console.error('MiniCloud:', html);
+  if (el) el.innerHTML = `<div class="empty-state" style="color:#ff6b6b;">
+    <i class="fas fa-triangle-exclamation"></i><p>${html}</p></div>`;
+  console.error('[MiniCloud Fatal]', html);
 }
 
-// ── Utils ─────────────────────────────────────────────────
+// ── Utils ──────────────────────────────────────────────────
 function formatFileSize(bytes) {
   if (!bytes && bytes !== 0) return '—';
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024, sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  if (bytes === 0) return '0 B';
+  const k = 1024, sz = ['B','KB','MB','GB','TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return Math.round((bytes / Math.pow(k, i)) * 10) / 10 + ' ' + sizes[i];
+  return (Math.round((bytes / k ** i) * 10) / 10) + ' ' + sz[i];
 }
 
 function formatDate(date) {
   if (!date) return 'Unknown';
   const d = date instanceof Date ? date : new Date(date);
-  const diffDays = Math.floor(Math.abs(new Date() - d) / 86400000);
-  if (diffDays === 0) return 'Today';
-  if (diffDays === 1) return 'Yesterday';
-  if (diffDays < 7)   return `${diffDays} days ago`;
-  if (diffDays < 30)  return `${Math.floor(diffDays / 7)} weeks ago`;
-  if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
-  return `${Math.floor(diffDays / 365)} years ago`;
+  const days = Math.floor(Math.abs(new Date() - d) / 86400000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7)  return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
 }
 
-function escapeHtml(str) {
-  return String(str || '')
+function escapeHtml(s) {
+  return String(s || '')
     .replaceAll('&','&amp;').replaceAll('<','&lt;')
     .replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
 }
 
-function escapeAttr(str) {
-  return String(str || '').replaceAll("'", "\\'");
-}
+function escapeAttr(s) { return String(s || '').replaceAll("'", "\\'"); }

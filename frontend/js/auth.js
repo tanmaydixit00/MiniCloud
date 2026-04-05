@@ -76,7 +76,7 @@ function showError(message) {
 }
 
 // Map Firebase error codes to user-friendly messages
-function friendlyError(code) {
+function friendlyError(code, message) {
   const map = {
     'auth/invalid-email': 'Please enter a valid email address.',
     'auth/user-not-found': 'No account found with this email.',
@@ -91,7 +91,7 @@ function friendlyError(code) {
     'auth/cancelled-popup-request': 'Another sign-in popup is already open.',
     'auth/operation-not-allowed': 'This sign-in method is not enabled in Firebase Auth settings.',
   };
-  return map[code] || 'Something went wrong. Please try again.';
+  return map[code] || `${message || 'Something went wrong.'} (Code: ${code || 'unknown'})`;
 }
 
 async function signInWithProvider(providerType, buttonEl) {
@@ -114,8 +114,8 @@ async function signInWithProvider(providerType, buttonEl) {
     }
 
     await auth.signInWithPopup(provider);
-    // onAuthStateChanged will redirect to index.html
   } catch (error) {
+    console.error('[Auth] Social login error:', error);
     showError(friendlyError(error.code));
   } finally {
     if (buttonEl) {
@@ -149,9 +149,9 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
     }
 
     await auth.signInWithEmailAndPassword(email, password);
-    // onAuthStateChanged will redirect to index.html
   } catch (error) {
-    showError(friendlyError(error.code));
+    console.error('[Auth] Login error:', error.code, error.message);
+    showError(friendlyError(error.code, error.message));
     if (submitBtn) {
       submitBtn.disabled = false;
       submitBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Login';
@@ -181,14 +181,12 @@ document.getElementById('signupForm')?.addEventListener('submit', async (e) => {
 
     const { user } = await auth.createUserWithEmailAndPassword(email, password);
 
-    // Set display name
     if (name) {
       await user.updateProfile({ displayName: name });
     }
-
-    // onAuthStateChanged will redirect to index.html
   } catch (error) {
-    showError(friendlyError(error.code));
+    console.error('[Auth] Signup error:', error.code, error.message);
+    showError(friendlyError(error.code, error.message));
     if (submitBtn) {
       submitBtn.disabled = false;
       submitBtn.innerHTML = '<i class="fas fa-user-plus"></i> Create Account';

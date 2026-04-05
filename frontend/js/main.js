@@ -1,5 +1,5 @@
 import { firebaseConfig } from './config.js';
-import { StorageManager } from './firebase-storage.js';
+import { StorageManager } from './supabase-storage.js';
 import { FileManager }    from './FileManager.js';
 import { showError, showSuccess, logError, friendlyFirebaseError } from './errorHandler.js';
 

@@ -128,6 +128,11 @@ export function friendlyFirebaseError(error) {
     'permission-denied':          'You do not have permission to perform this action.',
     'not-found':                  'The requested document was not found.',
     'unavailable':                'Service temporarily unavailable. Please try again.',
+    // Supabase Storage
+    'storage/duplicate':          'A file with this name already exists.',
+    'storage/payload-too-large':  'File is too large. Please upload a smaller file.',
+    'storage/timeout':            'Upload timed out. Check your connection and try again.',
+    'storage/upload-failed':      'Upload failed. Please try again.',
   };
   
   // Check for mapped error code first

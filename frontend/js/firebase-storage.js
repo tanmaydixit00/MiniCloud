@@ -41,6 +41,13 @@ export class StorageManager {
     return new Promise((resolve, reject) => {
       const task = ref.put(file);
 
+      const timeoutId = setTimeout(() => {
+        try { task.cancel(); } catch (_) {}
+        const err = new Error('Upload timed out. Please try again.');
+        err.code = 'storage/retry-limit-exceeded';
+        reject(err);
+      }, 120000);
+
       task.on(
         'state_changed',
         (snap) => {
@@ -48,10 +55,11 @@ export class StorageManager {
           if (onProgress) onProgress(pct);
         },
         (error) => {
-          console.error('[StorageManager] Upload error:', error);
+          clearTimeout(timeoutId);
           reject(error);
         },
         async () => {
+          clearTimeout(timeoutId);
           try {
             const url = await task.snapshot.ref.getDownloadURL();
             resolve({ path: filePath, url });

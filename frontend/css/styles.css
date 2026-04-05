@@ -652,6 +652,77 @@ nav { flex: 1; }
   justify-content: flex-end;
 }
 
+/* ── SHARE MODAL ──────────────────────────────────────── */
+.share-modal .share-info {
+  font-size: 14px;
+  color: var(--text);
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  background: rgba(0, 194, 255, 0.06);
+  border: 1px solid rgba(0, 194, 255, 0.15);
+  border-radius: var(--radius);
+}
+
+.share-link-box {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.share-link-input {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  color: var(--muted-light);
+  font-size: 13px;
+  font-family: monospace;
+  outline: none;
+}
+
+.btn-copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  border-radius: var(--radius);
+  background: var(--accent-grad);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  transition: filter var(--transition);
+}
+.btn-copy:hover { filter: brightness(1.1); }
+
+.share-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.btn-share-option {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+.btn-share-option:hover {
+  background: rgba(0, 194, 255, 0.08);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* ── AUTH PAGE ────────────────────────────────────────── */
 body.auth-page {
   min-height: 100vh;

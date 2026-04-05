@@ -117,17 +117,44 @@
 
 <!-- ── SHARE MODAL ─────────────────────────────────────── -->
 <div class="modal-overlay" id="shareModal" role="dialog" aria-modal="true" aria-labelledby="shareModalTitle">
-  <div class="modal-card">
+  <div class="modal-card share-modal">
     <div class="modal-header">
       <h3 id="shareModalTitle"><i class="fas fa-share-nodes"></i> Share File</h3>
       <button class="modal-close" data-close-modal="shareModal" aria-label="Close dialog">
         <i class="fas fa-xmark"></i>
       </button>
     </div>
-    <input id="shareEmail" type="email" placeholder="Enter email address" class="modal-input">
-    <div class="modal-footer">
-      <button class="btn-ghost" data-close-modal="shareModal">Cancel</button>
-      <button class="btn-primary" id="shareFileBtn">Share</button>
+
+    <!-- Step 1: Enter recipient email -->
+    <div id="shareStep1">
+      <input id="shareEmail" type="email" placeholder="Enter recipient email address" class="modal-input">
+      <div class="modal-footer">
+        <button class="btn-ghost" data-close-modal="shareModal">Cancel</button>
+        <button class="btn-primary" id="shareFileBtn">Next</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Share link + send options -->
+    <div id="shareStep2" style="display:none;">
+      <p class="share-info" id="shareFileInfo"></p>
+      <div class="share-link-box">
+        <input id="shareLinkInput" type="text" readonly class="share-link-input">
+        <button class="btn-copy" id="copyShareLinkBtn" title="Copy link">
+          <i class="fas fa-copy"></i>
+        </button>
+      </div>
+      <div class="share-actions">
+        <button class="btn-share-option" id="shareViaGmail">
+          <i class="fab fa-google"></i> Open in Gmail
+        </button>
+        <button class="btn-share-option" id="shareViaOutlook">
+          <i class="fab fa-microsoft"></i> Open in Outlook
+        </button>
+      </div>
+      <div class="modal-footer" style="margin-top:16px;">
+        <button class="btn-ghost" id="shareBackBtn">Back</button>
+        <button class="btn-primary" data-close-modal="shareModal">Done</button>
+      </div>
     </div>
   </div>
 </div>

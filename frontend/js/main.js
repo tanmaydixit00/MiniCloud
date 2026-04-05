@@ -195,6 +195,47 @@ function setupAuthListeners() {
   // Share confirm
   document.getElementById('shareFileBtn')?.addEventListener('click', shareHandler);
 
+  // Copy share link
+  document.getElementById('copyShareLinkBtn')?.addEventListener('click', () => {
+    const linkInput = document.getElementById('shareLinkInput');
+    if (linkInput) {
+      linkInput.select();
+      navigator.clipboard.writeText(linkInput.value).then(() => {
+        showSuccess('Link copied to clipboard.');
+      }).catch(() => {
+        // Fallback for older browsers
+        document.execCommand('copy');
+        showSuccess('Link copied to clipboard.');
+      });
+    }
+  });
+
+  // Share via Gmail
+  document.getElementById('shareViaGmail')?.addEventListener('click', () => {
+    const d = window._shareData;
+    if (!d) return;
+    window.open(
+      `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(d.email)}&su=${encodeURIComponent(d.subject)}&body=${encodeURIComponent(d.body)}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+  });
+
+  // Share via Outlook
+  document.getElementById('shareViaOutlook')?.addEventListener('click', () => {
+    const d = window._shareData;
+    if (!d) return;
+    window.location.href = `mailto:${d.email}?subject=${encodeURIComponent(d.subject)}&body=${encodeURIComponent(d.body)}`;
+  });
+
+  // Back to step 1
+  document.getElementById('shareBackBtn')?.addEventListener('click', () => {
+    const step1 = document.getElementById('shareStep1');
+    const step2 = document.getElementById('shareStep2');
+    if (step1) step1.style.display = '';
+    if (step2) step2.style.display = 'none';
+  });
+
   // New Folder
   document.getElementById('newFolderBtn')?.addEventListener('click', () => {
     const input = document.getElementById('folderName');
@@ -575,9 +616,15 @@ async function handleFiles(fileList) {
 
 // ── Share ──────────────────────────────────────────────────
 let _shareFileId = null;
+let _shareRecipient = null;
 
 function handleOpenShareModal(fileId) {
   _shareFileId = fileId;
+  _shareRecipient = null;
+  const step1 = document.getElementById('shareStep1');
+  const step2 = document.getElementById('shareStep2');
+  if (step1) step1.style.display = '';
+  if (step2) step2.style.display = 'none';
   const modal = document.getElementById('shareModal');
   if (modal) {
     modal.style.display = 'flex';
@@ -591,34 +638,45 @@ async function shareHandler() {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showError('Please enter a valid email address.');
 
   const btn = document.getElementById('shareFileBtn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sharing…'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing…'; }
 
   try {
     const fileDoc = await fileManager.getFileMetadata(_shareFileId);
     const user = auth.currentUser;
     const profile = resolveUserProfile(user);
+    _shareRecipient = email;
 
-    // 1. Open user's email client with pre-filled share message
-    const subject = encodeURIComponent(`${profile.name} shared "${fileDoc?.name || 'a file'}" with you`);
-    const body = encodeURIComponent(
-      `Hi,\n\n${profile.name} (${user.email}) has shared a file with you on MiniCloud.\n\n` +
-      `File: ${fileDoc?.name || 'Unknown'}\n` +
-      `Download: ${fileDoc?.storageUrl || 'Log in to MiniCloud to view it'}\n\n` +
-      `This file was shared via MiniCloud.`
-    );
-    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
-
-    // 2. Add recipient to Firestore sharedWith array
+    // Add recipient to Firestore sharedWith array
     await fileManager.shareFile(_shareFileId, email);
 
-    document.getElementById('shareEmail').value = '';
-    document.getElementById('shareModal').style.display = 'none';
-    showSuccess(`Share email prepared. Send it from your email client.`);
+    // Build share message
+    const fileName = fileDoc?.name || 'A file';
+    const downloadLink = fileDoc?.storageUrl || '';
+    const subject = `${profile.name} shared "${fileName}" with you`;
+    const body =
+      `Hi,\n\n${profile.name} (${user.email}) has shared a file with you on MiniCloud.\n\n` +
+      `File: ${fileName}\n` +
+      `Download: ${downloadLink}\n\n` +
+      `This file was shared via MiniCloud.`;
+
+    // Show step 2 with share link and send options
+    const step1 = document.getElementById('shareStep1');
+    const step2 = document.getElementById('shareStep2');
+    const fileInfo = document.getElementById('shareFileInfo');
+    const linkInput = document.getElementById('shareLinkInput');
+
+    if (fileInfo) fileInfo.textContent = `"${fileName}" shared with ${email}`;
+    if (linkInput) { linkInput.value = downloadLink; }
+    if (step1) step1.style.display = 'none';
+    if (step2) step2.style.display = '';
+
+    // Store share data for email buttons
+    window._shareData = { email, subject, body };
   } catch (err) {
     logError('Share', err);
     showError(`Share failed: ${friendlyFirebaseError(err)}`);
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = 'Share'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = 'Next'; }
   }
 }
 

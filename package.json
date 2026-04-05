@@ -1,0 +1,8 @@
+{
+  "name": "team-rocket",
+  "version": "1.0.0",
+  "description": "MyDrive - Cloud file storage with Firebase",
+  "scripts": {
+    "dev": "npx http-server frontend/ -o login.html -p 3000 -c-1"
+  }
+}

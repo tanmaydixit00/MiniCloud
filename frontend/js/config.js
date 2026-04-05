@@ -8,8 +8,8 @@
 //                         Railway, Render, etc.)
 //    2. process.env.*  — available in Node/bundler environments
 //                         (Vite, Webpack, etc.) with VITE_ prefix
-//    3. Hardcoded defaults — safe fallback for local development
-//       (Firebase keys are public; restricted by Security Rules)
+//    3. Hardcoded defaults — Firebase keys are public by design;
+//       security is enforced by Firestore & Storage rules, not key secrecy.
 //
 //  To configure environment-specific values on Vercel:
 //    Dashboard → Your Project → Settings → Environment Variables
@@ -51,12 +51,12 @@ function env(key, fallback = '') {
 
 // ── Firebase config ────────────────────────────────────────────────────────
 export const firebaseConfig = {
-  apiKey:            env('API_KEY'),
-  authDomain:        env('AUTH_DOMAIN'),
-  projectId:         env('PROJECT_ID'),
-  storageBucket:     env('STORAGE_BUCKET'),
-  messagingSenderId: env('MESSAGING_SENDER_ID'),
-  appId:             env('APP_ID'),
+  apiKey:            env('API_KEY',             'AIzaSyAgfMgkTinrNo-yuaAGyZDY7grTpmo8i2c'),
+  authDomain:        env('AUTH_DOMAIN',         'minicloud-6df35.firebaseapp.com'),
+  projectId:         env('PROJECT_ID',          'minicloud-6df35'),
+  storageBucket:     env('STORAGE_BUCKET',      'minicloud-6df35.firebasestorage.app'),
+  messagingSenderId: env('MESSAGING_SENDER_ID', '953691126064'),
+  appId:             env('APP_ID',              '1:953691126064:web:754a80c8abf23aa10e30f5'),
 };
 
 // ── Backend API base URL ───────────────────────────────────────────────────

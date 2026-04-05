@@ -3,24 +3,52 @@ import { StorageManager } from './firebase-storage.js';
 import { FileManager }    from './FileManager.js';
 import { showError, showSuccess, logError, friendlyFirebaseError } from './errorHandler.js';
 
+// ── Constants ──────────────────────────────────────────────
+const ROUTES = Object.freeze({
+  MY_FILES: 'my-files',
+  SHARED:   'shared',
+  STARRED:  'starred',
+  RECENT:   'recent',
+  TRASH:    'trash',
+});
+
+const ACTIONS = Object.freeze({
+  OPEN_FOLDER:      'open-folder',
+  TOGGLE_STAR:      'toggle-star',
+  VIEW:             'view',
+  SHARE:            'share',
+  DOWNLOAD:         'download',
+  MOVE_TO_TRASH:    'move-to-trash',
+  RESTORE:          'restore',
+  PERMANENT_DELETE: 'permanent-delete',
+});
+
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
+const BLOCKED_EXTENSIONS = new Set([
+  'exe','bat','cmd','com','scr','pif','msi','vbs','js','ws','wsf','wsc','wsh',
+  'ps1','ps1xml','ps2','ps2xml','psc1','psc2','msh','msh1','msh2','mshxml',
+  'msh1xml','msh2xml','scf','lnk','inf','reg','cpl','dll','drv','sys',
+  'ade','adp','app','bas','chm','crt','hlp','hta','ins','isp','its',
+]);
+const FOLDER_NAME_RE = /^[^<>:"\\/|?*\x00-\x1f]{1,80}$/;
+const SEARCH_DEBOUNCE_MS = 200;
+
 // ── Firebase init ──────────────────────────────────────────
 let firebaseReady = false;
 let auth;
 try {
   if (!firebase.apps.length) {
-    console.log('[Firebase] Initializing project:', firebaseConfig.projectId);
     firebase.initializeApp(firebaseConfig);
   }
   auth = firebase.auth();
   firebaseReady = true;
-  console.log('[Firebase] OK');
 } catch (e) {
   showFatalError('Firebase init failed. Check js/config.js.<br><code>' + e.message + '</code>');
 }
 
 let storageManager;
 let fileManager;
-let currentRoute = 'my-files';
+let currentRoute = ROUTES.MY_FILES;
 let allItems     = [];           // cache for search
 
 // ── Folder navigation state ────────────────────────────────
@@ -62,7 +90,7 @@ async function initAuthedUI(user) {
     if (imgEl)   { imgEl.src = profile.photoUrl; imgEl.alt = profile.name + ' avatar'; }
 
     setupAuthListeners();
-    switchRoute('my-files');
+    switchRoute(ROUTES.MY_FILES);
   } catch (err) {
     logError('Bootstrap', err);
     showFatalError('Failed to initialize: ' + err.message);
@@ -75,10 +103,31 @@ function setupNavListeners() {
     el.addEventListener('click', (e) => { e.preventDefault(); switchRoute(el.dataset.route); });
   });
 
-  // Modal backdrop close
-  ['shareModal', 'folderModal'].forEach((id) => {
-    document.getElementById(id)?.addEventListener('click', (e) => {
-      if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
+  // Modal backdrop + close button handlers
+  document.querySelectorAll('[data-close-modal]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const modalId = btn.dataset.closeModal;
+      const modal = document.getElementById(modalId);
+      if (modal) modal.style.display = 'none';
+    });
+  });
+
+  // Escape key closes modals
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.modal-overlay[style*="display: flex"]').forEach((m) => {
+        m.style.display = 'none';
+      });
+    }
+  });
+
+  // Modal focus trap
+  document.querySelectorAll('.modal-overlay').forEach((overlay) => {
+    overlay.addEventListener('transitionend', () => {
+      if (overlay.style.display === 'flex') {
+        const firstInput = overlay.querySelector('input, button:not([data-close-modal])');
+        if (firstInput) firstInput.focus();
+      }
     });
   });
 
@@ -110,6 +159,14 @@ function setupAuthListeners() {
       document.getElementById('fileInput')?.click();
   });
 
+  // Upload zone keyboard (Enter/Space)
+  document.getElementById('uploadZone')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      document.getElementById('fileInput')?.click();
+    }
+  });
+
   // File input
   document.getElementById('fileInput')?.addEventListener('change', (e) =>
     handleFiles(e.target.files)
@@ -125,10 +182,14 @@ function setupAuthListeners() {
     handleFiles(e.dataTransfer.files);
   });
 
-  // Search
+  // Search (debounced)
+  let searchTimer = null;
   document.getElementById('searchInput')?.addEventListener('input', (e) => {
-    const q = e.target.value.trim().toLowerCase();
-    renderItems(q ? allItems.filter((item) => item.name.toLowerCase().includes(q)) : allItems);
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      const q = e.target.value.trim().toLowerCase();
+      renderItems(q ? allItems.filter((item) => item.name.toLowerCase().includes(q)) : allItems);
+    }, SEARCH_DEBOUNCE_MS);
   });
 
   // Share confirm
@@ -160,10 +221,10 @@ function switchRoute(route) {
 
   // Upload & New Folder only on My Files
   const actionBtns = document.getElementById('actionBtns');
-  if (actionBtns) actionBtns.style.display = route === 'my-files' ? '' : 'none';
+  if (actionBtns) actionBtns.style.display = route === ROUTES.MY_FILES ? '' : 'none';
 
   const uploadZone = document.getElementById('uploadZone');
-  if (uploadZone) uploadZone.style.display = route === 'my-files' ? '' : 'none';
+  if (uploadZone) uploadZone.style.display = route === ROUTES.MY_FILES ? '' : 'none';
 
   // Clear search
   const searchInput = document.getElementById('searchInput');
@@ -176,7 +237,7 @@ function switchRoute(route) {
 }
 
 function routeLabel(route) {
-  return ({ 'my-files': 'My Files', shared: 'Shared with Me', starred: 'Starred', recent: 'Recent', trash: 'Trash' })[route] || 'Files';
+  return ({ [ROUTES.MY_FILES]: 'My Files', [ROUTES.SHARED]: 'Shared with Me', [ROUTES.STARRED]: 'Starred', [ROUTES.RECENT]: 'Recent', [ROUTES.TRASH]: 'Trash' })[route] || 'Files';
 }
 
 // ── Folder navigation ──────────────────────────────────────
@@ -186,17 +247,11 @@ function navigateToFolder(folderId, folderName) {
   loadCurrentView();
 }
 
-window.navigateBreadcrumb = (index) => {
-  folderStack = folderStack.slice(0, index + 1);
-  renderBreadcrumbs();
-  loadCurrentView();
-};
-
 function renderBreadcrumbs() {
   const el = document.getElementById('breadcrumbs');
   if (!el) return;
 
-  if (currentRoute !== 'my-files' || folderStack.length <= 1) {
+  if (currentRoute !== ROUTES.MY_FILES || folderStack.length <= 1) {
     el.innerHTML = '';
     return;
   }
@@ -207,10 +262,19 @@ function renderBreadcrumbs() {
       return `<span class="breadcrumb-item"><span class="breadcrumb-current">${escapeHtml(crumb.name)}</span></span>`;
     }
     return `<span class="breadcrumb-item">
-      <span class="breadcrumb-link" onclick="navigateBreadcrumb(${i})">${escapeHtml(crumb.name)}</span>
+      <span class="breadcrumb-link" data-breadcrumb-index="${i}">${escapeHtml(crumb.name)}</span>
       <i class="fas fa-chevron-right breadcrumb-sep"></i>
     </span>`;
   }).join('');
+
+  el.querySelectorAll('.breadcrumb-link').forEach((link) => {
+    link.addEventListener('click', () => {
+      const idx = parseInt(link.dataset.breadcrumbIndex, 10);
+      folderStack = folderStack.slice(0, idx + 1);
+      renderBreadcrumbs();
+      loadCurrentView();
+    });
+  });
 }
 
 // ── Load / Subscribe ───────────────────────────────────────
@@ -236,11 +300,11 @@ function loadCurrentView() {
     renderRouteError(error);
   };
 
-  if      (currentRoute === 'my-files') unsubscribeListener = fileManager.listenMyFiles(cb, onErr, currentFolderId());
-  else if (currentRoute === 'shared')   unsubscribeListener = fileManager.listenSharedWithMe(cb, onErr);
-  else if (currentRoute === 'starred')  unsubscribeListener = fileManager.listenStarred(cb, onErr);
-  else if (currentRoute === 'recent')   unsubscribeListener = fileManager.listenRecent(cb, onErr);
-  else if (currentRoute === 'trash')    unsubscribeListener = fileManager.listenTrash(cb, onErr);
+  if      (currentRoute === ROUTES.MY_FILES) unsubscribeListener = fileManager.listenMyFiles(cb, onErr, currentFolderId());
+  else if (currentRoute === ROUTES.SHARED)   unsubscribeListener = fileManager.listenSharedWithMe(cb, onErr);
+  else if (currentRoute === ROUTES.STARRED)  unsubscribeListener = fileManager.listenStarred(cb, onErr);
+  else if (currentRoute === ROUTES.RECENT)   unsubscribeListener = fileManager.listenRecent(cb, onErr);
+  else if (currentRoute === ROUTES.TRASH)    unsubscribeListener = fileManager.listenTrash(cb, onErr);
 }
 
 // ── Render ─────────────────────────────────────────────────
@@ -256,7 +320,7 @@ function renderItems(items) {
   permissionRetrySet.clear();
 
   if (!items || items.length === 0) {
-    const isTrash = currentRoute === 'trash';
+    const isTrash = currentRoute === ROUTES.TRASH;
     el.innerHTML = `<div class="empty-state">
       <i class="fas ${isTrash ? 'fa-trash' : 'fa-folder-open'}"></i>
       <p>${isTrash ? 'Trash is empty' : 'No files or folders here yet'}</p>
@@ -264,7 +328,7 @@ function renderItems(items) {
     return;
   }
 
-  const isTrash  = currentRoute === 'trash';
+  const isTrash  = currentRoute === ROUTES.TRASH;
 
   el.innerHTML = items.map((item) => {
     const isFolder = item.type === 'folder';
@@ -337,13 +401,23 @@ function renderItems(items) {
 
   // ── Event delegation for all file-card actions ──────────
   el.querySelectorAll('.file-card').forEach((card) => {
+    const handleCardAction = () => {
+      const folderBtn = card.querySelector('[data-action="open-folder"]');
+      if (folderBtn && currentRoute === ROUTES.MY_FILES) {
+        navigateToFolder(folderBtn.dataset.id, folderBtn.dataset.name);
+      }
+    };
     card.addEventListener('click', (e) => {
       const folderBtn = e.target.closest('[data-action="open-folder"]');
       if (folderBtn) {
         e.stopPropagation();
-        if (currentRoute !== 'my-files') return;
-        navigateToFolder(folderBtn.dataset.id, folderBtn.dataset.name);
-        return;
+        handleCardAction();
+      }
+    });
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handleCardAction();
       }
     });
   });
@@ -351,39 +425,43 @@ function renderItems(items) {
   el.querySelectorAll('.file-actions button').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const action = btn.dataset.action;
-      const id = btn.dataset.id;
-      switch (action) {
-        case 'toggle-star':
-          handleToggleStar(id, btn.dataset.starred === 'true', btn);
-          break;
-        case 'view':
-          window.open(btn.dataset.url, '_blank', 'noopener,noreferrer');
-          break;
-        case 'share':
-          handleOpenShareModal(id);
-          break;
-        case 'download':
-          handleDownloadFile(btn.dataset.storagePath, btn.dataset.name, btn);
-          break;
-        case 'move-to-trash':
-          handleMoveToTrash(id, btn);
-          break;
-        case 'restore':
-          handleRestoreFile(id, btn);
-          break;
-        case 'permanent-delete':
-          handlePermanentDelete(id, btn.dataset.storagePath, btn);
-          break;
+      dispatchAction(btn);
+    });
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        dispatchAction(btn);
       }
     });
   });
 }
 
-// ── Open folder ────────────────────────────────────────────
-function openFolderFromCard(folderId, folderName) {
-  if (currentRoute !== 'my-files') return;
-  navigateToFolder(folderId, folderName);
+function dispatchAction(btn) {
+  const action = btn.dataset.action;
+  const id = btn.dataset.id;
+  switch (action) {
+    case ACTIONS.TOGGLE_STAR:
+      handleToggleStar(id, btn.dataset.starred === 'true', btn);
+      break;
+    case ACTIONS.VIEW:
+      window.open(btn.dataset.url, '_blank', 'noopener,noreferrer');
+      break;
+    case ACTIONS.SHARE:
+      handleOpenShareModal(id);
+      break;
+    case ACTIONS.DOWNLOAD:
+      handleDownloadFile(btn.dataset.storagePath, btn.dataset.name, btn);
+      break;
+    case ACTIONS.MOVE_TO_TRASH:
+      handleMoveToTrash(id, btn);
+      break;
+    case ACTIONS.RESTORE:
+      handleRestoreFile(id, btn);
+      break;
+    case ACTIONS.PERMANENT_DELETE:
+      handlePermanentDelete(id, btn.dataset.storagePath, btn);
+      break;
+  }
 }
 
 function renderRouteError(error) {
@@ -407,7 +485,6 @@ function resolveUserProfile(user) {
 }
 
 // ── Create Folder ──────────────────────────────────────────
-const FOLDER_NAME_RE = /^[^<>:"\\/|?*\x00-\x1f]{1,80}$/;
 
 async function handleCreateFolder() {
   const input = document.getElementById('folderName');
@@ -435,13 +512,6 @@ async function handleCreateFolder() {
 }
 
 // ── Upload ─────────────────────────────────────────────────
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
-const BLOCKED_EXTENSIONS = new Set([
-  'exe','bat','cmd','com','scr','pif','msi','vbs','js','ws','wsf','wsc','wsh',
-  'ps1','ps1xml','ps2','ps2xml','psc1','psc2','msh','msh1','msh2','mshxml',
-  'msh1xml','msh2xml','scf','lnk','inf','reg','cpl','dll','drv','sys',
-  'ade','adp','app','bas','chm','cpl','crt','hlp','hta','ins','isp','its',
-]);
 
 async function handleFiles(fileList) {
   const files = Array.from(fileList || []);

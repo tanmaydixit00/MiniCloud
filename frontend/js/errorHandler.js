@@ -15,6 +15,8 @@ function getToastContainer() {
   if (!container) {
     container = document.createElement('div');
     container.id = 'toastContainer';
+    container.setAttribute('role', 'status');
+    container.setAttribute('aria-live', 'polite');
     Object.assign(container.style, {
       position:   'fixed',
       bottom:     '24px',
@@ -126,10 +128,6 @@ export function friendlyFirebaseError(error) {
     'permission-denied':          'You do not have permission to perform this action.',
     'not-found':                  'The requested document was not found.',
     'unavailable':                'Service temporarily unavailable. Please try again.',
-    // Supabase Storage
-    'Duplicate': 'A file with this name already exists.',
-    'Payload too large': 'File is too large. Please upload a smaller file.',
-    'Invalid JWT': 'Authentication failed. Please sign in again.',
   };
   
   // Check for mapped error code first

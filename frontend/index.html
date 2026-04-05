@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' https://ui-avatars.com data: blob:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://*.firebasestorage.app wss://*.firebaseio.com; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' https://ui-avatars.com data: blob:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://*.firebasestorage.app https://firebasestorage.googleapis.com wss://*.firebaseio.com; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self';">
   <title>MiniCloud — Your Files</title>
   <meta name="description" content="MiniCloud: Secure cloud storage for your files.">
 
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -96,7 +96,7 @@
       </div>
 
       <!-- UPLOAD AREA -->
-      <div class="upload-box" id="uploadZone">
+      <div class="upload-box" id="uploadZone" role="button" tabindex="0" aria-label="Upload files by clicking or dragging">
         <i class="fas fa-cloud-upload-alt"></i>
         <p>Drag &amp; drop files or <span>browse</span></p>
         <input type="file" multiple id="fileInput" style="display:none;">
@@ -116,34 +116,34 @@
 </div>
 
 <!-- ── SHARE MODAL ─────────────────────────────────────── -->
-<div class="modal-overlay" id="shareModal">
+<div class="modal-overlay" id="shareModal" role="dialog" aria-modal="true" aria-labelledby="shareModalTitle">
   <div class="modal-card">
     <div class="modal-header">
-      <h3><i class="fas fa-share-nodes"></i> Share File</h3>
-      <button class="modal-close" onclick="document.getElementById('shareModal').style.display='none'">
+      <h3 id="shareModalTitle"><i class="fas fa-share-nodes"></i> Share File</h3>
+      <button class="modal-close" data-close-modal="shareModal" aria-label="Close dialog">
         <i class="fas fa-xmark"></i>
       </button>
     </div>
     <input id="shareEmail" type="email" placeholder="Enter email address" class="modal-input">
     <div class="modal-footer">
-      <button class="btn-ghost" onclick="document.getElementById('shareModal').style.display='none'">Cancel</button>
+      <button class="btn-ghost" data-close-modal="shareModal">Cancel</button>
       <button class="btn-primary" id="shareFileBtn">Share</button>
     </div>
   </div>
 </div>
 
 <!-- ── NEW FOLDER MODAL ───────────────────────────────── -->
-<div class="modal-overlay" id="folderModal">
+<div class="modal-overlay" id="folderModal" role="dialog" aria-modal="true" aria-labelledby="folderModalTitle">
   <div class="modal-card">
     <div class="modal-header">
-      <h3><i class="fas fa-folder-plus"></i> New Folder</h3>
-      <button class="modal-close" onclick="document.getElementById('folderModal').style.display='none'">
+      <h3 id="folderModalTitle"><i class="fas fa-folder-plus"></i> New Folder</h3>
+      <button class="modal-close" data-close-modal="folderModal" aria-label="Close dialog">
         <i class="fas fa-xmark"></i>
       </button>
     </div>
     <input id="folderName" type="text" placeholder="Folder name" class="modal-input" maxlength="80">
     <div class="modal-footer">
-      <button class="btn-ghost" onclick="document.getElementById('folderModal').style.display='none'">Cancel</button>
+      <button class="btn-ghost" data-close-modal="folderModal">Cancel</button>
       <button class="btn-primary" id="createFolderBtn">Create</button>
     </div>
   </div>

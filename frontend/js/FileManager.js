@@ -6,8 +6,7 @@ export class FileManager {
     this.userId      = userId;
     this.userEmail   = String(userEmail || '').trim().toLowerCase();
     this.db          = firebase.firestore();
-    this.col         = this.db.collection('files'); // holds both files and folders
-    console.log('[FileManager] Init for user:', userId, userEmail);
+    this.col         = this.db.collection('files');
   }
 
   // ── Helpers ──────────────────────────────────────────────
@@ -74,7 +73,6 @@ export class FileManager {
       updatedAt:  firebase.firestore.FieldValue.serverTimestamp(),
     };
     const ref = await this.col.add(data);
-    console.log('[FileManager] Folder created:', ref.id, name);
     return ref.id;
   }
 
@@ -100,9 +98,7 @@ export class FileManager {
       createdAt:   firebase.firestore.FieldValue.serverTimestamp(),
       updatedAt:   firebase.firestore.FieldValue.serverTimestamp(),
     };
-    console.log('[FileManager] Adding metadata:', metadata.name, 'in folder:', parentId);
     const ref = await this.col.add(metadata);
-    console.log('[FileManager] Metadata saved:', ref.id);
     return ref.id;
   }
 

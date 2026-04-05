@@ -17,7 +17,6 @@ export class StorageManager {
       throw new Error('Firebase Storage SDK not loaded.');
     }
     this.storage = firebase.storage();
-    console.log('[StorageManager] Firebase Storage ready');
   }
 
   /** Sanitise filename for safe storage paths */
@@ -39,8 +38,6 @@ export class StorageManager {
     const filePath  = `files/${userId}/${Date.now()}_${safeName}`;
     const ref       = this.storage.ref(filePath);
 
-    console.log('[StorageManager] Starting upload:', filePath);
-
     return new Promise((resolve, reject) => {
       const task = ref.put(file);
 
@@ -57,7 +54,6 @@ export class StorageManager {
         async () => {
           try {
             const url = await task.snapshot.ref.getDownloadURL();
-            console.log('[StorageManager] Upload complete:', { path: filePath, url });
             resolve({ path: filePath, url });
           } catch (err) {
             reject(err);
@@ -76,14 +72,10 @@ export class StorageManager {
     await this.ensureReady();
     try {
       await this.storage.ref(filePath).delete();
-      console.log('[StorageManager] Deleted from storage:', filePath);
     } catch (error) {
-      // Ignore "not found" — may have already been deleted
       if (error.code !== 'storage/object-not-found') {
-        console.error('[StorageManager] Delete error:', error);
         throw error;
       }
-      console.warn('[StorageManager] File not found in storage (already deleted?):', filePath);
     }
   }
 
@@ -94,7 +86,6 @@ export class StorageManager {
    */
   async downloadFile(filePath) {
     await this.ensureReady();
-    console.log('[StorageManager] Downloading:', filePath);
     const url      = await this.storage.ref(filePath).getDownloadURL();
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Download failed: ${response.status}`);

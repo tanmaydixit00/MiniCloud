@@ -18,7 +18,7 @@ const auth = firebase.auth();
 // Redirect to dashboard if already signed in
 auth.onAuthStateChanged((user) => {
   if (user) {
-    window.location.replace('/');
+    window.location.replace('index.html');
   }
 }, (err) => {
   const errorDiv = document.getElementById('authError');

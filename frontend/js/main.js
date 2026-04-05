@@ -81,7 +81,7 @@ if (firebaseReady) {
 
     auth.onAuthStateChanged((user) => {
       if (!user) {
-        window.location.replace('/login.html');
+        window.location.replace('login.html');
         return;
       }
       // Auth succeeded — clear the counter
